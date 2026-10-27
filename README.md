@@ -52,7 +52,7 @@ both SMTP conversations is recorded.
   - **Resend** for finished messages
   - **Diagnostics**: connection and login test against the relay with full transcript, test message
   - **Settings** that take effect immediately, without a restart
-  - Auto-refresh and dark mode
+  - Auto-refresh, dark mode and a layout for phones
 - History in SQLite with configurable retention. Keeping message content permanently can be turned off; it
   is then only kept until delivery is finished.
 
@@ -168,6 +168,10 @@ the other was temporarily refused and is queued for a retry:
 **Settings**:
 
 ![Settings](docs/screenshots/settings.png)
+
+**On a phone**, lists turn into cards and the navigation into a swipeable bar:
+
+![Mobile layout](docs/screenshots/mobile.png)
 
 ### Upgrades and database migrations
 
