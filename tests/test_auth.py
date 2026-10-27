@@ -63,7 +63,9 @@ def test_login_required(settings):
     assert r.status_code == 303 and r.headers["location"] == "/login?next=%2Fmessages%2F1"
     assert client.post("/queue/deliver-all", follow_redirects=False).status_code == 401
     assert client.get("/healthz").status_code == 200
-    assert "container log" in client.get("/login").text
+    page = client.get("/login").text
+    assert "container log" in page
+    assert '<a href="https://github.com/Commifreak/smtp-relay" target="_blank" rel="noopener">GitHub</a>' in page
 
 
 def test_wrong_password(settings):

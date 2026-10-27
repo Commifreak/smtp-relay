@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__
+from . import __repo_url__, __version__
 from .auth import (MIN_PASSWORD_LENGTH, SESSION_COOKIE, SESSION_LIFETIME, Sessions, check_login, proxy_user,
                    set_credentials, verify_password)
 from .config import DEFAULTS, LIST_KEYS, Settings, normalize_ip
@@ -77,7 +77,7 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
     env.filters["ts"] = fmt_ts
     env.filters["size"] = fmt_size
     env.filters["fromjson"] = lambda s: json.loads(s) if s else []
-    env.globals.update(STATUS_LABELS=STATUS_LABELS, KIND_LABELS=KIND_LABELS, version=__version__,
+    env.globals.update(STATUS_LABELS=STATUS_LABELS, KIND_LABELS=KIND_LABELS, version=__version__, repo_url=__repo_url__,
                        queue_count=queue.queued_count)
 
     web_sessions = Sessions(db)

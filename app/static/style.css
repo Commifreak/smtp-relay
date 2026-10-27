@@ -27,6 +27,7 @@ nav a.active, nav a:hover { background: var(--info-bg); color: var(--text); text
 .live { color: var(--muted); font-size: 13px; white-space: nowrap; }
 main { padding: 20px; max-width: 1400px; margin: 0 auto; }
 footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px; }
+footer a { color: inherit; text-decoration: underline; }
 h1 { font-size: 20px; margin: 0 0 16px; display: flex; align-items: center; gap: 10px; }
 h2 { font-size: 16px; margin: 28px 0 10px; }
 .muted { color: var(--muted); }
