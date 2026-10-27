@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import transcript %}
 {% block title %}Setup{% endblock %}
 {% block content %}
 <div class="narrow wide">
@@ -46,7 +47,11 @@
     </div>
     <label class="check"><input type="checkbox" name="relay_tls_verify" {{ 'checked' if s.relay_tls_verify }}> Verify the relay's TLS certificate</label>
     {% if test %}
-    <div class="alert {{ 'ok' if test.ok else 'err' }}">{{ test.detail }} – <a href="/sessions/{{ test.session_id }}" target="_blank">show SMTP transcript</a></div>
+    <div class="alert {{ 'ok' if test.ok else 'err' }}">{{ test.detail }}</div>
+    <details class="test-transcript" {{ 'open' if not test.ok }}>
+      <summary>SMTP transcript</summary>
+      {{ transcript(test.session) }}
+    </details>
     {% endif %}
     <div class="wizard-nav">
       <a href="/setup/account">← Back</a>

@@ -225,7 +225,10 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
             return render_setup(request, "relay", errors=errors, values=values)
         if form.get("action") == "test":
             session_id, ok, detail = await test_connection(db, settings.snapshot())
-            return render_setup(request, "relay", test={"ok": ok, "detail": detail, "session_id": session_id})
+            # Shown inline: the sessions page is not reachable before the setup is completed.
+            session = db.query_one("SELECT * FROM sessions WHERE id = ?", (session_id,))
+            session["lines"] = db.transcript(session_id)
+            return render_setup(request, "relay", test={"ok": ok, "detail": detail, "session": session})
         raise Redirect("/setup/senders")
 
     @app.post("/setup/senders", response_class=HTMLResponse, dependencies=[Depends(setup_auth)])
