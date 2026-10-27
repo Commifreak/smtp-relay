@@ -99,6 +99,11 @@ def test_setup_wizard(settings):
     assert r.headers["location"] == "/setup/relay"
     assert settings.get("auth_username") == "me" and settings.get("auth_initial_password") == ""
 
+    page = client.get("/setup/relay").text  # no preset server details
+    assert 'name="host" value=""' in page and 'name="port" value=""' in page
+    assert '<option value="" disabled selected>Choose…</option>' in page
+    r = client.post("/setup/relay", data={"host": "smtp.example.net", "port": "", "security": ""})
+    assert "Port must be between 1 and 65535" in r.text and "Choose an encryption mode" in r.text
     r = client.post("/setup/relay", data={"host": "127.0.0.1", "port": "1", "security": "none", "action": "test"})
     assert "SMTP transcript" in r.text and "Connecting to 127.0.0.1:1" in r.text  # inline, no link
     assert "/sessions/" not in r.text

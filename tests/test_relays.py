@@ -50,6 +50,11 @@ def test_validation(relays):
     assert not errors  # disabled relays may overlap
 
 
+def test_new_relay_has_no_server_defaults(relays):
+    _, errors = relays.save({"name": "x", "senders": "@x.example"})
+    assert set(errors) == {"Host is required", "Port must be between 1 and 65535", "Choose an encryption mode"}
+
+
 def test_password_kept_when_empty(relays):
     relay_id = add(relays, "home", ["@home.example.com"], password="secret")
     relays.save({"password": "", "port": 587}, relay_id)
