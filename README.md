@@ -68,12 +68,29 @@ the other was temporarily refused and is queued for a retry:
 
 ## Quick start
 
-```bash
-git clone git@github.com:Commifreak/smtp-relay.git
-cd smtp-relay
-cp .env.example .env      # enter relay credentials and a web UI password
-docker compose up -d --build
-```
+Prebuilt images for amd64 and arm64 are published to the GitHub Container Registry as
+`ghcr.io/commifreak/mta-relay`.
+
+1. Get `docker-compose.yml` and `.env.example` from this repository, e.g. by cloning it:
+
+   ```bash
+   git clone git@github.com:Commifreak/smtp-relay.git
+   cd smtp-relay
+   cp .env.example .env      # enter relay credentials and a web UI password
+   ```
+
+2. While the image is private, log in to the registry once on the Docker host. Use a GitHub personal
+   access token (classic) with the `read:packages` scope:
+
+   ```bash
+   echo <TOKEN> | docker login ghcr.io -u <github-user> --password-stdin
+   ```
+
+3. Start it:
+
+   ```bash
+   docker compose up -d
+   ```
 
 - SMTP: `<docker-host>:25`
 - Web UI: `http://<docker-host>:8080` (user and password from `WEBUI_USER` / `WEBUI_PASSWORD`)
@@ -86,6 +103,27 @@ Test from the LAN:
 ```bash
 swaks --server <docker-host>:25 --from nas@example.com --to you@example.com --header "Subject: Test"
 ```
+
+### Updates and image tags
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+| Tag         | Contents                                                                 |
+|-------------|--------------------------------------------------------------------------|
+| `1`         | Latest 1.x release – **default in `docker-compose.yml`**, never jumps to 2.x |
+| `1.1`       | Latest 1.1.x release (bug fixes only)                                    |
+| `1.1.0`     | Exactly this release                                                     |
+| `latest`    | Latest build of the `main` branch (may contain unreleased changes)       |
+| `sha-…`     | A specific commit                                                        |
+
+Pinning the major version means a future 2.0 with breaking changes will not be installed automatically;
+switch to `:2` deliberately after reading the release notes.
+
+### Building from source
+
+Replace the `image:` line in `docker-compose.yml` with `build: .` and run `docker compose up -d --build`.
 
 ## mailbox.org
 
@@ -154,5 +192,11 @@ Layout:
 - `app/web.py` and `app/templates/`: web UI (FastAPI and Jinja2, no external browser dependencies)
 - `app/db.py`: SQLite (settings, sessions, transcript lines, messages)
 
-The GitHub Action runs the tests on every push and builds a multi-arch image (amd64/arm64) published to
-`ghcr.io/<owner>/mta-relay`.
+The GitHub Action runs the tests on every push and pull request. Pushes to `main` publish the `latest`
+image; pushing a version tag publishes the release tags:
+
+```bash
+git tag v1.2.0 && git push origin v1.2.0   # -> images 1.2.0, 1.2 and 1
+```
+
+Keep `__version__` in `app/__init__.py` in sync with the tag.

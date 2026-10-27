@@ -37,9 +37,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/mta-relay
+          # Release tag v1.2.3 -> 1.2.3, 1.2, 1; every push to main -> latest
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=sha
       - uses: docker/build-push-action@v6
         with:
