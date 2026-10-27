@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Setup{% endblock %}
+{% block content %}
+<div class="narrow wide">
+  <h1>Welcome to smtp-relay</h1>
+  <ol class="steps">
+    {% for key, label in steps %}
+    <li class="{{ 'done' if loop.index0 < index }}{{ 'current' if loop.index0 == index }}">{% if loop.index0 < index %}<a href="/setup/{{ key }}">{{ label }}</a>{% else %}{{ label }}{% endif %}</li>
+    {% endfor %}
+  </ol>
+  {% for e in errors %}<div class="alert err">{{ e }}</div>{% endfor %}
+
+  {% if step == 'account' %}
+  <form method="post" class="settings card">
+    <h2>Your account</h2>
+    <p class="hint">Choose the username and password for the web UI.{% if initial %} The generated initial password from the container log stops working afterwards.{% endif %}</p>
+    <label>Username<input name="username" value="{{ s.auth_username }}" autocomplete="username" required></label>
+    <div class="row">
+      <label>Password <small>at least {{ min_password }} characters{% if not initial %}; leave empty to keep the current one{% endif %}</small><input type="password" name="password" autocomplete="new-password" {{ 'required' if initial }}></label>
+      <label>Repeat password<input type="password" name="password2" autocomplete="new-password" {{ 'required' if initial }}></label>
+    </div>
+    <details {{ 'open' if s.proxy_auth_enabled }}>
+      <summary>Optional: single sign-on via reverse proxy (e.g. Authelia)</summary>
+      <div class="details-body">{% include "_proxy_auth.html" %}</div>
+    </details>
+    <div class="wizard-nav"><span></span><button class="primary">Next →</button></div>
+  </form>
+
+  {% elif step == 'relay' %}
+  <form method="post" class="settings card">
+    <h2>Relay server</h2>
+    <p class="hint">The SMTP server that delivers your mail, e.g. your mail provider. For mailbox.org: <code>smtp.mailbox.org</code>, port 465 with SSL/TLS or 587 with STARTTLS, your mailbox.org address and preferably an app password.</p>
+    <div class="row">
+      <label>Host<input name="relay_host" value="{{ s.relay_host }}" required></label>
+      <label>Port<input type="number" name="relay_port" value="{{ s.relay_port }}" required></label>
+      <label>Encryption
+        <select name="relay_security">
+          <option value="ssl" {{ 'selected' if s.relay_security == 'ssl' }}>SSL/TLS (implicit, usually port 465)</option>
+          <option value="starttls" {{ 'selected' if s.relay_security == 'starttls' }}>STARTTLS (usually port 587)</option>
+          <option value="none" {{ 'selected' if s.relay_security == 'none' }}>None (unencrypted)</option>
+        </select></label>
+    </div>
+    <div class="row">
+      <label>Username<input name="relay_username" value="{{ s.relay_username }}" autocomplete="off"></label>
+      <label>Password <small>{{ 'stored – leave empty to keep it' if s.relay_password else 'not set' }}</small><input type="password" name="relay_password" autocomplete="new-password"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="relay_tls_verify" {{ 'checked' if s.relay_tls_verify }}> Verify the relay's TLS certificate</label>
+    {% if test %}
+    <div class="alert {{ 'ok' if test.ok else 'err' }}">{{ test.detail }} – <a href="/sessions/{{ test.session_id }}" target="_blank">show SMTP transcript</a></div>
+    {% endif %}
+    <div class="wizard-nav">
+      <a href="/setup/account">← Back</a>
+      <span><button name="action" value="test">Save &amp; test connection</button> <button class="primary" name="action" value="next">Next →</button></span>
+    </div>
+  </form>
+
+  {% elif step == 'senders' %}
+  <form method="post" class="settings card">
+    <h2>Who may send mail?</h2>
+    <p class="hint">Only messages from these sender addresses and client networks are accepted. Everything else is rejected – this keeps smtp-relay from becoming an open relay.</p>
+    <label>Allowed senders <small>one per line · <code>service@example.com</code>, <code>@example.com</code> (whole domain) or <code>*</code> (anyone)</small>
+      <textarea name="allowed_senders" rows="5" placeholder="nas@example.com&#10;@home.example.com">{{ s.allowed_senders|join('\n') }}</textarea></label>
+    <label>Allowed client networks <small>CIDR, one per line</small>
+      <textarea name="allowed_networks" rows="5">{{ s.allowed_networks|join('\n') }}</textarea></label>
+    <div class="wizard-nav"><a href="/setup/relay">← Back</a><button class="primary">Next →</button></div>
+  </form>
+
+  {% elif step == 'options' %}
+  <form method="post" class="settings card">
+    <h2>Options</h2>
+    <p class="hint">Providers like mailbox.org only accept sender addresses that belong to your account. Rewriting replaces the sender of all relayed mail with one of your addresses; the original sender is kept as display name, Reply-To and <code>X-Original-From</code>.</p>
+    <label class="check"><input type="checkbox" name="rewrite_enabled" {{ 'checked' if s.rewrite_enabled }}> Rewrite the sender address</label>
+    <div class="row">
+      <label>New sender address<input name="rewrite_from_address" value="{{ s.rewrite_from_address }}" placeholder="relay@yourdomain.com"></label>
+      <label>Display name
+        <select name="rewrite_name_mode">
+          <option value="keep" {{ 'selected' if s.rewrite_name_mode == 'keep' }}>Keep original display name</option>
+          <option value="address" {{ 'selected' if s.rewrite_name_mode == 'address' }}>Original address as display name</option>
+          <option value="none" {{ 'selected' if s.rewrite_name_mode == 'none' }}>No display name</option>
+        </select></label>
+    </div>
+    <label>Failure notifications to <small>optional; receives a message when delivery finally fails</small><input name="notify_address" value="{{ s.notify_address }}" placeholder="admin@example.com"></label>
+    <p class="hint">Everything can be changed later under Settings.</p>
+    <div class="wizard-nav"><a href="/setup/senders">← Back</a><button class="primary">Finish setup</button></div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

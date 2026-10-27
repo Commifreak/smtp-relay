@@ -1,4 +1,4 @@
-"""End-to-end: client -> MTA-Relay (incl. delivery queue) -> fake upstream relay."""
+"""End-to-end: client -> smtp-relay (incl. delivery queue) -> fake upstream relay."""
 import asyncio
 import json
 import smtplib
@@ -10,6 +10,7 @@ import pytest
 from aiosmtpd.controller import Controller
 from fastapi.testclient import TestClient
 
+from app.auth import set_credentials
 from app.config import Settings
 from app.db import Database
 from app.delivery import DeliveryQueue
@@ -90,6 +91,16 @@ def env(tmp_path):
     ctrl.stop()
 
 
+def web_client(env) -> TestClient:
+    """Web UI client with completed setup, logged in as the local admin."""
+    set_credentials(env.settings, "admin", "secret-password")
+    env.settings.set_internal(setup_completed=True)
+    client = TestClient(create_app(env.db, env.settings, env.queue))
+    r = client.post("/login", data={"username": "admin", "password": "secret-password"}, follow_redirects=False)
+    assert r.status_code == 303
+    return client
+
+
 MSG = "From: NAS <nas@intern.lan>\r\nTo: me@example.de\r\nSubject: Backup ok\r\n\r\nAll good.\r\n"
 
 
@@ -153,7 +164,7 @@ def test_network_rejected(env):
 def test_relay_down_queues_and_retries(env):
     env.relay_down()
     before = time.time()
-    assert env.send() == {}  # accepted by MTA-Relay despite relay outage
+    assert env.send() == {}  # accepted by smtp-relay despite relay outage
     m = env.message()
     assert m["status"] == "queued"
     assert m["attempts"] == 1
@@ -254,7 +265,7 @@ def test_web_ui(env):
     env.send()
     env.relay_down()
     env.send()
-    client = TestClient(create_app(env.db, env.settings, env.queue))
+    client = web_client(env)
     for url in ["/", "/?q=Backup", "/?status=queued", "/messages/1", "/messages/2", "/queue", "/sessions",
                 "/sessions/1", "/sessions?kind=outbound", "/settings", "/tools", "/messages/1/eml", "/healthz"]:
         r = client.get(url)
@@ -289,7 +300,7 @@ def test_web_ui(env):
 def test_web_remove_from_queue(env):
     env.relay_down()
     env.send()
-    client = TestClient(create_app(env.db, env.settings, env.queue))
+    client = web_client(env)
     r = client.post("/queue/1/remove", follow_redirects=False)
     assert r.status_code == 303
     m = env.message()

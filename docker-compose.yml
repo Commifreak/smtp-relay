@@ -1,17 +1,22 @@
 services:
-  mta-relay:
+  smtp-relay:
     # Major version tag: receives all 1.x updates, never jumps to a new major version.
-    image: ghcr.io/commifreak/mta-relay:1
+    image: ghcr.io/commifreak/smtp-relay:1
     # To build from source instead, replace the image line above with:
     # build: .
-    container_name: mta-relay
+    container_name: smtp-relay
     restart: unless-stopped
-    env_file: .env
+    environment:
+      TZ: Europe/Berlin          # time zone for timestamps in the web UI
+      # LOG_LEVEL: INFO
+      # RESET_ADMIN_PASSWORD: "true"   # prints a new initial password on start; remove afterwards
+      # TLS_CERT_FILE: /data/tls/cert.pem   # optional STARTTLS for inbound connections
+      # TLS_KEY_FILE: /data/tls/key.pem
     ports:
       - "25:2525"     # SMTP from the local network
       - "8080:8080"   # web UI
     volumes:
-      - mta-relay-data:/data
+      - smtp-relay-data:/data
 
 volumes:
-  mta-relay-data:
+  smtp-relay-data:

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+<div class="narrow">
+  <h1>Log in</h1>
+  {% if error %}<div class="alert err">{{ error }}</div>{% endif %}
+  {% if initial %}
+  <div class="alert info">First start: the initial username and password are printed in the container log, e.g. <code>docker logs smtp-relay</code>. You will choose your own credentials in the setup wizard.</div>
+  {% endif %}
+  <form method="post" action="/login" class="settings card">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>Username<input name="username" value="{{ username }}" autocomplete="username" autofocus required></label>
+    <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="primary">Log in</button>
+  </form>
+</div>
+{% endblock %}

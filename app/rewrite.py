@@ -149,7 +149,7 @@ def prepare(raw: bytes, mail_from: str, settings: dict, trace: dict | None = Non
     if settings.get("add_received_header") and trace:
         received = (f"Received: from {trace.get('helo') or 'unknown'} "
                     f"({trace.get('client_name') or 'unknown'} [{trace.get('client_ip')}])\r\n"
-                    f"\tby {settings.get('smtp_hostname')} (MTA-Relay) with ESMTP id {trace.get('id')}\r\n"
+                    f"\tby {settings.get('smtp_hostname')} (smtp-relay) with ESMTP id {trace.get('id')}\r\n"
                     f"\tfor <{trace.get('rcpt')}>; {formatdate(time.time(), localtime=True)}\r\n")
         fields.insert(0, received.encode("utf-8", "replace"))
 

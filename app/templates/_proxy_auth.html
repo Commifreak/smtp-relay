@@ -1,0 +1,8 @@
+<p class="hint">If smtp-relay runs behind a reverse proxy with forward authentication (Authelia, Authentik, oauth2-proxy …), users signed in there are logged in automatically. The header is only trusted for requests coming from the proxy networks below; local login keeps working as a fallback.</p>
+<label class="check"><input type="checkbox" name="proxy_auth_enabled" {{ 'checked' if s.proxy_auth_enabled }}> Trust the user header of the reverse proxy</label>
+<div class="row">
+  <label>User header <small>Authelia: <code>Remote-User</code></small><input name="proxy_auth_header" value="{{ s.proxy_auth_header }}"></label>
+  <label>Logout URL <small>optional, e.g. <code>https://auth.example.com/logout</code></small><input name="proxy_auth_logout_url" value="{{ s.proxy_auth_logout_url }}"></label>
+</div>
+<label>Trusted proxy networks <small>CIDR, one per line – the IP of your reverse proxy as seen by smtp-relay (e.g. the Docker network)</small>
+  <textarea name="proxy_auth_trusted_networks" rows="3" placeholder="172.18.0.0/16">{{ s.proxy_auth_trusted_networks|join('\n') }}</textarea></label>
