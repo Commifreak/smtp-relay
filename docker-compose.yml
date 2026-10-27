@@ -1,7 +1,9 @@
 services:
   mta-relay:
-    build: .
-    image: mta-relay:latest
+    # Major version tag: receives all 1.x updates, never jumps to a new major version.
+    image: ghcr.io/commifreak/mta-relay:1
+    # To build from source instead, replace the image line above with:
+    # build: .
     container_name: mta-relay
     restart: unless-stopped
     env_file: .env
