@@ -18,6 +18,7 @@ from email.utils import formatdate, make_msgid
 from .config import Settings, parse_intervals
 from .db import Database, Transcript
 from .relay import reply_text, send_sync
+from .relays import Relays, as_settings
 from .rewrite import header_meta, prepare, split_message
 
 log = logging.getLogger("smtp-relay.queue")
@@ -59,6 +60,7 @@ class DeliveryQueue:
     def __init__(self, db: Database, settings: Settings):
         self.db = db
         self.settings = settings
+        self.relays = Relays(db)
         self.loop: asyncio.AbstractEventLoop | None = None
         self._wake = asyncio.Event()
 
@@ -169,15 +171,26 @@ class DeliveryQueue:
         now = time.time()
         self.db.update_message(message_id, status="relaying", attempts=attempt_no, last_attempt_at=now)
 
+        # Routed on every attempt, so fixing a relay's configuration also applies to queued messages.
+        if row["relay_id"]:
+            relay, pattern = self.relays.get(row["relay_id"]), None
+        else:
+            relay, pattern = self.relays.route(row["mail_from"])
+        if relay is not None:
+            settings.update(as_settings(relay))
+            self.db.update_message(message_id, relay_name=relay["name"])
+
         trace = None
         if row["session_id"]:
             trace = {"helo": row["helo"], "client_name": row["client_name"], "client_ip": row["client_ip"],
                      "id": message_id, "rcpt": pending[0] if pending else ""}
         data, envelope_from, notes = prepare(row["raw"], row["mail_from"], settings, trace)
-        session_id = self.db.create_session(
-            "outbound", peer=f"{settings['relay_host']}:{settings['relay_port']}", message_id=message_id)
+        peer = f"{settings['relay_host']}:{settings['relay_port']}" if relay else None
+        session_id = self.db.create_session("outbound", peer=peer, message_id=message_id)
         t = Transcript(self.db, session_id)
         t.info(f"Delivery attempt {attempt_no} for {len(pending)} recipient(s): {', '.join(pending)}")
+        if relay is not None:
+            t.info(f"Relay “{relay['name']}”" + (f" (sender matches {pattern})" if pattern else ""))
         for note in notes:
             t.info(note)
         self.db.update_message(message_id, relay_from=envelope_from)
@@ -187,6 +200,10 @@ class DeliveryQueue:
         perm: dict[str, tuple[int, str]] = {}
         upstream = ""
         try:
+            if relay is None:
+                reason = ("The relay of this message no longer exists" if row["relay_id"]
+                          else "No enabled relay matches the sender")
+                raise smtplib.SMTPSenderRefused(550, reason.encode(), row["mail_from"])
             refused, reply = await asyncio.to_thread(send_sync, settings, envelope_from, pending, data, t, smtputf8)
             upstream = reply_text(*reply) if reply else "250 Ok"
             for rcpt, (code, msg) in refused.items():
@@ -251,15 +268,15 @@ class DeliveryQueue:
         self.db.update_message(message_id, **fields)
 
         if status in ("partial", "failed") and not row["is_notification"]:
-            self._notify(row, settings, failed, attempt_no)
+            self._notify(row, settings, relay or self.relays.first(), failed, attempt_no)
         codes = [c for c, _ in perm.values()]
         return AttemptResult(status, detail, max(codes) if codes else 554)
 
-    def _notify(self, row: dict, settings: dict, failed: list[str], attempts: int) -> None:
+    def _notify(self, row: dict, settings: dict, relay: dict | None, failed: list[str], attempts: int) -> None:
         to = settings.get("notify_address")
-        if not to:
+        if not to or relay is None:
             return
-        sender = settings.get("rewrite_from_address") or settings.get("relay_username") or to
+        sender = (relay["rewrite_from_address"] if relay["rewrite_enabled"] else "") or relay["username"] or to
         m = EmailMessage()
         m["From"] = f"smtp-relay <{sender}>"
         m["To"] = to
@@ -293,5 +310,5 @@ class DeliveryQueue:
                              filename="original-headers.txt")
         raw = m.as_bytes(policy=m.policy.clone(linesep="\r\n"))
         self.accept(raw=raw, mail_from=sender, rcpts=[to], status="queued", client_ip="smtp-relay",
-                    client_name="Notification", is_notification=1)
+                    client_name="Notification", is_notification=1, relay_id=relay["id"])
         self.wake()

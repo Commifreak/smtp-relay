@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Relays{% endblock %}
+{% block content %}
+<h1>Relays</h1>
+{% if saved %}<div class="alert ok">Relay saved and active immediately.</div>{% endif %}
+{% if deleted %}<div class="alert ok">Relay deleted.</div>{% endif %}
+<p class="muted">Each relay server handles the senders listed for it. Senders that match no enabled relay are rejected. If several relays match, the most specific pattern wins: exact address, then domain, then <code>*</code>.</p>
+<div class="actions"><a class="btn primary" href="/relays/new">Add relay</a></div>
+<table class="list">
+<thead><tr><th>Name</th><th>Senders</th><th>Server</th><th>Sender rewriting</th><th>Mails (24 h)</th><th></th></tr></thead>
+<tbody>
+{% for r in relays %}
+<tr class="clickable" data-href="/relays/{{ r.id }}">
+  <td><a href="/relays/{{ r.id }}">{{ r.name }}</a>{% if not r.enabled %} <span class="badge">disabled</span>{% endif %}</td>
+  <td>{% for p in r.senders %}<code>{{ p }}</code>{{ ' ' if not loop.last }}{% else %}<span class="err">none – matches nothing</span>{% endfor %}</td>
+  <td>{{ r.host }}:{{ r.port }}<div class="sub">{{ {'ssl': 'SSL/TLS', 'starttls': 'STARTTLS', 'none': 'unencrypted'}[r.security] }}{% if r.username %} · {{ r.username }}{% endif %}</div></td>
+  <td>{% if r.rewrite_enabled %}→ {{ r.rewrite_from_address }}{% else %}<span class="muted">off</span>{% endif %}</td>
+  <td>{{ usage.get(r.name, 0) }}</td>
+  <td class="nowrap"><form method="post" action="/relays/{{ r.id }}/test" class="inline"><button>Test</button></form></td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="muted center">No relay configured – all mail is rejected.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

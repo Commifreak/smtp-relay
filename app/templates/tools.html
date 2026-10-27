@@ -2,18 +2,26 @@
 {% block title %}Diagnostics{% endblock %}
 {% block content %}
 <h1>Diagnostics</h1>
+{% if not relays %}<div class="alert warn">No relay configured yet. <a href="/relays/new">Add a relay</a></div>{% endif %}
 <fieldset>
   <legend>Test relay connection</legend>
-  <p>Connects to <strong>{{ s.relay_host }}:{{ s.relay_port }}</strong> ({{ s.relay_security }}), logs in{% if s.relay_username %} as <strong>{{ s.relay_username }}</strong>{% endif %} and shows the full SMTP conversation. No mail is sent.</p>
-  <form method="post" action="/tools/test-connection"><button class="primary">Test connection</button></form>
+  <p>Connects to the relay server, logs in and shows the full SMTP conversation. No mail is sent.</p>
+  {% for r in relays %}
+  <form method="post" action="/relays/{{ r.id }}/test" class="inline"><button {{ 'class=primary' if loop.first }}>Test “{{ r.name }}” ({{ r.host }}:{{ r.port }})</button></form>
+  {% endfor %}
 </fieldset>
 <fieldset>
   <legend>Send test message</legend>
-  <p class="hint">Sent directly through the relay (including sender rewriting). The sender allowlist does not apply here.</p>
+  <p class="hint">Sent directly through a relay (including that relay's sender rewriting); the sender does not have to match a sender pattern.</p>
   <form method="post" action="/tools/send-test" class="settings">
+    <label>Relay
+      <select name="relay_id">
+        <option value="">Choose by sender (like normal mail)</option>
+        {% for r in relays %}<option value="{{ r.id }}" {{ 'selected' if loop.first }}>{{ r.name }} ({{ r.host }})</option>{% endfor %}
+      </select></label>
     <div class="row">
       <label>From<input name="from" value="{{ default_from }}" required></label>
-      <label>To<input name="to" value="{{ s.relay_username }}" required></label>
+      <label>To<input name="to" value="{{ default_to }}" required></label>
     </div>
     <label>Subject<input name="subject" value="smtp-relay test message"></label>
     <label>Text<textarea name="body" rows="4">This is a test message from smtp-relay.</textarea></label>
@@ -23,6 +31,8 @@
 <fieldset>
   <legend>Test from the local network</legend>
   <p>From a machine on your network, e.g. with <code>swaks</code>:</p>
-  <pre class="body">swaks --server &lt;docker-host&gt;:25 --from {{ (s.allowed_senders[0] if s.allowed_senders and '@' in s.allowed_senders[0] and not s.allowed_senders[0].startswith(('@', '*')) else 'service@example.com') }} --to {{ s.relay_username or 'you@example.com' }} --header "Subject: Test"</pre>
+  {% set sample = namespace(sender='service@example.com') %}
+  {% for r in relays %}{% for p in r.senders if '@' in p and not p.startswith(('@', '*')) and sample.sender == 'service@example.com' %}{% set sample.sender = p %}{% endfor %}{% endfor %}
+  <pre class="body">swaks --server &lt;docker-host&gt;:25 --from {{ sample.sender }} --to {{ default_to or 'you@example.com' }} --header "Subject: Test"</pre>
 </fieldset>
 {% endblock %}

@@ -9,22 +9,9 @@ from .db import Database
 DEFAULTS: dict = {
     "smtp_hostname": "smtp-relay",
     "allowed_networks": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fc00::/7"],
-    "allowed_senders": [],
     "allowed_recipients": [],
     "max_message_size_mb": 25,
-    "relay_host": "smtp.mailbox.org",
-    "relay_port": 465,
-    "relay_security": "ssl",  # ssl | starttls | none
-    "relay_tls_verify": True,
-    "relay_username": "",
-    "relay_password": "",
-    "relay_timeout": 30,
-    "rewrite_enabled": False,
-    "rewrite_from_address": "",
-    "rewrite_name_mode": "keep",  # keep | address | fixed | none
-    "rewrite_fixed_name": "",
-    "rewrite_set_reply_to": True,
-    "rewrite_envelope": True,
+    "relay_timeout": 30,  # connection details, sender patterns and rewriting are configured per relay
     "add_received_header": True,
     "add_missing_headers": True,
     "store_content": True,
@@ -47,7 +34,7 @@ INTERNAL: dict = {
     "auth_initial_password": "",  # generated password, kept until the admin sets their own
 }
 
-LIST_KEYS = {"allowed_networks", "allowed_senders", "allowed_recipients", "proxy_auth_trusted_networks"}
+LIST_KEYS = {"allowed_networks", "allowed_recipients", "proxy_auth_trusted_networks"}
 BOOL_KEYS = {k for k, v in DEFAULTS.items() if isinstance(v, bool)}
 INT_KEYS = {k for k, v in DEFAULTS.items() if isinstance(v, int) and not isinstance(v, bool)}
 SECURITY_MODES = ("ssl", "starttls", "none")
@@ -89,20 +76,11 @@ def validate(values: dict) -> tuple[dict, list[str]]:
             ipaddress.ip_network(net, strict=False)
         except ValueError:
             errors.append(f"Invalid network: {net}")
-    for key in ("allowed_senders", "allowed_recipients"):
-        if key in clean:
-            clean[key] = [p.lower() for p in clean[key]]
-            for p in clean[key]:
-                if not PATTERN_RE.match(p):
-                    errors.append(f"Invalid address pattern: {p}")
-    if "relay_port" in clean and not 1 <= clean["relay_port"] <= 65535:
-        errors.append("Relay port must be between 1 and 65535")
-    if clean.get("relay_security", "ssl") not in SECURITY_MODES:
-        errors.append("Invalid encryption mode")
-    if clean.get("rewrite_name_mode", "keep") not in NAME_MODES:
-        errors.append("Invalid display name mode")
-    if clean.get("rewrite_enabled") and not ADDRESS_RE.match(clean.get("rewrite_from_address", "")):
-        errors.append("Rewriting requires a valid sender address")
+    if "allowed_recipients" in clean:
+        clean["allowed_recipients"] = [p.lower() for p in clean["allowed_recipients"]]
+        for p in clean["allowed_recipients"]:
+            if not PATTERN_RE.match(p):
+                errors.append(f"Invalid address pattern: {p}")
     if "retry_intervals" in clean:
         try:
             clean["retry_intervals"] = ", ".join(str(m) for m in parse_intervals(clean["retry_intervals"]))

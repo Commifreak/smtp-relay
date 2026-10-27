@@ -6,6 +6,7 @@ from app.auth import ensure_credentials, hash_password, set_credentials, verify_
 from app.config import Settings
 from app.db import Database
 from app.delivery import DeliveryQueue
+from app.relays import Relays
 from app.web import create_app
 
 PROXY_IP = "172.18.0.5"
@@ -98,17 +99,20 @@ def test_setup_wizard(settings):
     assert r.headers["location"] == "/setup/relay"
     assert settings.get("auth_username") == "me" and settings.get("auth_initial_password") == ""
 
-    r = client.post("/setup/relay", data={"relay_host": "127.0.0.1", "relay_port": "1", "relay_security": "none",
-                                          "action": "test"})
+    r = client.post("/setup/relay", data={"host": "127.0.0.1", "port": "1", "security": "none", "action": "test"})
     assert "SMTP transcript" in r.text and "Connecting to 127.0.0.1:1" in r.text  # inline, no link
     assert "/sessions/" not in r.text
-    r = client.post("/setup/relay", data={"relay_host": "smtp.example.net", "relay_port": "587",
-                                          "relay_security": "starttls", "relay_username": "me@example.net",
-                                          "relay_password": "pw", "relay_tls_verify": "on"}, follow_redirects=False)
+    r = client.post("/setup/relay", data={"host": "smtp.example.net", "port": "587", "security": "starttls",
+                                          "username": "me@example.net", "password": "pw", "tls_verify": "on"},
+                    follow_redirects=False)
     assert r.headers["location"] == "/setup/senders"
-    assert settings.get("relay_port") == 587 and settings.get("relay_password") == "pw"
+    relays = Relays(settings.db).all()
+    assert len(relays) == 1  # the test run and the final save edit the same relay
+    assert relays[0]["name"] == "smtp.example.net" and relays[0]["port"] == 587 and relays[0]["password"] == "pw"
 
-    r = client.post("/setup/senders", data={"allowed_senders": "nas@example.com\n@iot.example.com",
+    r = client.post("/setup/senders", data={"senders": "", "allowed_networks": "192.168.0.0/16"})
+    assert "at least one sender" in r.text
+    r = client.post("/setup/senders", data={"senders": "nas@example.com\n@iot.example.com",
                                             "allowed_networks": "192.168.0.0/16"}, follow_redirects=False)
     assert r.headers["location"] == "/setup/options"
 
@@ -120,7 +124,10 @@ def test_setup_wizard(settings):
                     follow_redirects=False)
     assert r.headers["location"] == "/"
     assert settings.get("setup_completed") is True
-    assert settings.get("allowed_senders") == ["nas@example.com", "@iot.example.com"]
+    relay = Relays(settings.db).first()
+    assert relay["senders"] == ["nas@example.com", "@iot.example.com"]
+    assert relay["rewrite_from_address"] == "relay@example.net" and relay["password"] == "pw"
+    assert settings.get("notify_address") == "me@example.net"
 
     assert client.get("/").status_code == 200
     assert client.get("/setup/account", follow_redirects=False).headers["location"] == "/"

@@ -116,3 +116,4 @@ form.user button { padding: 3px 10px; font-size: 13px; }
 details > .details-body { margin: 0; padding: 0 12px 12px; }
 #account { margin-top: 24px; }
 .test-transcript .transcript { max-height: 360px; }
+.btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }

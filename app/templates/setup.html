@@ -30,22 +30,25 @@
   {% elif step == 'relay' %}
   <form method="post" class="settings card">
     <h2>Relay server</h2>
-    <p class="hint">The SMTP server that delivers your mail, e.g. your mail provider. For mailbox.org: <code>smtp.mailbox.org</code>, port 465 with SSL/TLS or 587 with STARTTLS, your mailbox.org address and preferably an app password.</p>
+    <p class="hint">The SMTP server that delivers your mail, e.g. your mail provider. For mailbox.org: <code>smtp.mailbox.org</code>, port 465 with SSL/TLS or 587 with STARTTLS, your mailbox.org address and preferably an app password. More relays for other senders can be added later under Relays.</p>
     <div class="row">
-      <label>Host<input name="relay_host" value="{{ s.relay_host }}" required></label>
-      <label>Port<input type="number" name="relay_port" value="{{ s.relay_port }}" required></label>
+      <label>Name <small>optional, defaults to the host</small><input name="name" value="{{ r.name }}" placeholder="mailbox.org"></label>
+    </div>
+    <div class="row">
+      <label>Host<input name="host" value="{{ r.host }}" required></label>
+      <label>Port<input type="number" name="port" value="{{ r.port }}" required></label>
       <label>Encryption
-        <select name="relay_security">
-          <option value="ssl" {{ 'selected' if s.relay_security == 'ssl' }}>SSL/TLS (implicit, usually port 465)</option>
-          <option value="starttls" {{ 'selected' if s.relay_security == 'starttls' }}>STARTTLS (usually port 587)</option>
-          <option value="none" {{ 'selected' if s.relay_security == 'none' }}>None (unencrypted)</option>
+        <select name="security">
+          <option value="ssl" {{ 'selected' if r.security == 'ssl' }}>SSL/TLS (implicit, usually port 465)</option>
+          <option value="starttls" {{ 'selected' if r.security == 'starttls' }}>STARTTLS (usually port 587)</option>
+          <option value="none" {{ 'selected' if r.security == 'none' }}>None (unencrypted)</option>
         </select></label>
     </div>
     <div class="row">
-      <label>Username<input name="relay_username" value="{{ s.relay_username }}" autocomplete="off"></label>
-      <label>Password <small>{{ 'stored – leave empty to keep it' if s.relay_password else 'not set' }}</small><input type="password" name="relay_password" autocomplete="new-password"></label>
+      <label>Username<input name="username" value="{{ r.username }}" autocomplete="off"></label>
+      <label>Password <small>{{ 'stored – leave empty to keep it' if r.password else 'not set' }}</small><input type="password" name="password" autocomplete="new-password"></label>
     </div>
-    <label class="check"><input type="checkbox" name="relay_tls_verify" {{ 'checked' if s.relay_tls_verify }}> Verify the relay's TLS certificate</label>
+    <label class="check"><input type="checkbox" name="tls_verify" {{ 'checked' if r.tls_verify }}> Verify the relay's TLS certificate</label>
     {% if test %}
     <div class="alert {{ 'ok' if test.ok else 'err' }}">{{ test.detail }}</div>
     <details class="test-transcript" {{ 'open' if not test.ok }}>
@@ -62,9 +65,9 @@
   {% elif step == 'senders' %}
   <form method="post" class="settings card">
     <h2>Who may send mail?</h2>
-    <p class="hint">Only messages from these sender addresses and client networks are accepted. Everything else is rejected – this keeps smtp-relay from becoming an open relay.</p>
-    <label>Allowed senders <small>one per line · <code>service@example.com</code>, <code>@example.com</code> (whole domain) or <code>*</code> (anyone)</small>
-      <textarea name="allowed_senders" rows="5" placeholder="nas@example.com&#10;@home.example.com">{{ s.allowed_senders|join('\n') }}</textarea></label>
+    <p class="hint">Only messages from these sender addresses and client networks are accepted and sent through “{{ r.name }}”. Everything else is rejected – this keeps smtp-relay from becoming an open relay.</p>
+    <label>Senders for this relay <small>one per line · <code>service@example.com</code>, <code>@example.com</code> (whole domain) or <code>*</code> (anyone)</small>
+      <textarea name="senders" rows="5" placeholder="nas@example.com&#10;@home.example.com">{{ r.senders|join('\n') }}</textarea></label>
     <label>Allowed client networks <small>CIDR, one per line</small>
       <textarea name="allowed_networks" rows="5">{{ s.allowed_networks|join('\n') }}</textarea></label>
     <div class="wizard-nav"><a href="/setup/relay">← Back</a><button class="primary">Next →</button></div>
@@ -73,15 +76,15 @@
   {% elif step == 'options' %}
   <form method="post" class="settings card">
     <h2>Options</h2>
-    <p class="hint">Providers like mailbox.org only accept sender addresses that belong to your account. Rewriting replaces the sender of all relayed mail with one of your addresses; the original sender is kept as display name, Reply-To and <code>X-Original-From</code>.</p>
-    <label class="check"><input type="checkbox" name="rewrite_enabled" {{ 'checked' if s.rewrite_enabled }}> Rewrite the sender address</label>
+    <p class="hint">Providers like mailbox.org only accept sender addresses that belong to your account. Rewriting replaces the sender of mail sent through “{{ r.name }}” with one of your addresses; the original sender is kept as display name, Reply-To and <code>X-Original-From</code>.</p>
+    <label class="check"><input type="checkbox" name="rewrite_enabled" {{ 'checked' if r.rewrite_enabled }}> Rewrite the sender address</label>
     <div class="row">
-      <label>New sender address<input name="rewrite_from_address" value="{{ s.rewrite_from_address }}" placeholder="relay@yourdomain.com"></label>
+      <label>New sender address<input name="rewrite_from_address" value="{{ r.rewrite_from_address }}" placeholder="relay@yourdomain.com"></label>
       <label>Display name
         <select name="rewrite_name_mode">
-          <option value="keep" {{ 'selected' if s.rewrite_name_mode == 'keep' }}>Keep original display name</option>
-          <option value="address" {{ 'selected' if s.rewrite_name_mode == 'address' }}>Original address as display name</option>
-          <option value="none" {{ 'selected' if s.rewrite_name_mode == 'none' }}>No display name</option>
+          <option value="keep" {{ 'selected' if r.rewrite_name_mode == 'keep' }}>Keep original display name</option>
+          <option value="address" {{ 'selected' if r.rewrite_name_mode == 'address' }}>Original address as display name</option>
+          <option value="none" {{ 'selected' if r.rewrite_name_mode == 'none' }}>No display name</option>
         </select></label>
     </div>
     <label>Failure notifications to <small>optional; receives a message when delivery finally fails</small><input name="notify_address" value="{{ s.notify_address }}" placeholder="admin@example.com"></label>

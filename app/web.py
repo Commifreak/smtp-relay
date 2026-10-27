@@ -21,6 +21,7 @@ from .config import DEFAULTS, LIST_KEYS, Settings, normalize_ip
 from .db import Database
 from .delivery import DeliveryQueue
 from .relay import test_connection
+from .relays import BOOL_FIELDS as RELAY_BOOL_FIELDS, FIELDS as RELAY_FIELDS, NEW_RELAY, Relays, as_settings
 from .rewrite import message_parts
 
 log = logging.getLogger("smtp-relay.web")
@@ -80,6 +81,7 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
                        queue_count=queue.queued_count)
 
     web_sessions = Sessions(db)
+    relays = queue.relays
 
     @app.exception_handler(Redirect)
     async def handle_redirect(request: Request, exc: Redirect):
@@ -172,7 +174,8 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         names = [k for k, _ in SETUP_STEPS]
         ctx.setdefault("errors", [])
         return render(request, "setup.html", bare=True, step=step, steps=SETUP_STEPS, index=names.index(step),
-                      s={**settings.snapshot(), **ctx.pop("values", {})}, min_password=MIN_PASSWORD_LENGTH,
+                      s={**settings.snapshot(), **ctx.pop("values", {})},
+                      r={**(relays.first() or NEW_RELAY), **ctx.pop("relay_values", {})}, min_password=MIN_PASSWORD_LENGTH,
                       initial=bool(settings.get("auth_initial_password")), **ctx)
 
     @app.get("/setup", dependencies=[Depends(setup_auth)])
@@ -211,20 +214,22 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         web_sessions.delete_others(request.cookies.get(SESSION_COOKIE))
         raise Redirect("/setup/relay")
 
+    async def run_connection_test(relay: dict) -> tuple[int, bool, str]:
+        return await test_connection(db, {**settings.snapshot(), **as_settings(relay)})
+
     @app.post("/setup/relay", response_class=HTMLResponse, dependencies=[Depends(setup_auth)])
     async def setup_relay(request: Request):
         form = await request.form()
-        keys = ("relay_host", "relay_port", "relay_security", "relay_username", "relay_password")
-        values = {k: form.get(k, "") for k in keys}
-        values["relay_tls_verify"] = "relay_tls_verify" in form
-        if not values["relay_password"]:
-            values.pop("relay_password")  # keep the stored password
-        errors = settings.update(values)
+        values = {k: str(form.get(k, "")) for k in ("name", "host", "port", "security", "username", "password")}
+        values["tls_verify"] = "tls_verify" in form
+        values["name"] = values["name"].strip() or values["host"].strip()
+        relay = relays.first()
+        relay_id, errors = relays.save(values, relay["id"] if relay else None, require_senders=False)
         if errors:
-            values.pop("relay_password", None)
-            return render_setup(request, "relay", errors=errors, values=values)
+            values.pop("password")
+            return render_setup(request, "relay", errors=errors, relay_values=values)
         if form.get("action") == "test":
-            session_id, ok, detail = await test_connection(db, settings.snapshot())
+            session_id, ok, detail = await run_connection_test(relays.get(relay_id))
             # Shown inline: the sessions page is not reachable before the setup is completed.
             session = db.query_one("SELECT * FROM sessions WHERE id = ?", (session_id,))
             session["lines"] = db.transcript(session_id)
@@ -233,25 +238,96 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
 
     @app.post("/setup/senders", response_class=HTMLResponse, dependencies=[Depends(setup_auth)])
     async def setup_senders(request: Request):
+        relay = relays.first()
+        if relay is None:
+            raise Redirect("/setup/relay")
         form = await request.form()
-        values = {k: form.get(k, "") for k in ("allowed_senders", "allowed_networks")}
-        errors = settings.update(values)
+        senders, networks = str(form.get("senders", "")), str(form.get("allowed_networks", ""))
+        _, errors = relays.save({"senders": senders}, relay["id"])
+        errors += settings.update({"allowed_networks": networks})
         if errors:
-            return render_setup(request, "senders", errors=errors,
-                                values={k: str(v).splitlines() for k, v in values.items()})
+            return render_setup(request, "senders", errors=errors, values={"allowed_networks": networks.splitlines()},
+                                relay_values={"senders": senders.splitlines()})
         raise Redirect("/setup/options")
 
     @app.post("/setup/options", response_class=HTMLResponse, dependencies=[Depends(setup_auth)])
     async def setup_options(request: Request):
+        relay = relays.first()
+        if relay is None:
+            raise Redirect("/setup/relay")
         form = await request.form()
-        values = {k: form.get(k, "") for k in ("rewrite_from_address", "rewrite_name_mode", "notify_address")}
-        values["rewrite_enabled"] = "rewrite_enabled" in form
-        errors = settings.update(values)
+        rewrite = {k: str(form.get(k, "")) for k in ("rewrite_from_address", "rewrite_name_mode")}
+        rewrite["rewrite_enabled"] = "rewrite_enabled" in form
+        notify = str(form.get("notify_address", ""))
+        _, errors = relays.save(rewrite, relay["id"])
+        errors += settings.update({"notify_address": notify})
         if errors:
-            return render_setup(request, "options", errors=errors, values=values)
+            return render_setup(request, "options", errors=errors, values={"notify_address": notify},
+                                relay_values=rewrite)
         settings.set_internal(setup_completed=True)
         log.info("Setup completed")
         raise Redirect("/")
+
+    def relay_form(form) -> dict:
+        values = {k: str(form[k]) for k in RELAY_FIELDS if k not in RELAY_BOOL_FIELDS and k in form}
+        values.update({k: k in form for k in RELAY_BOOL_FIELDS})
+        return values
+
+    def render_relay(request, relay: dict, relay_id: int | None, errors=()):
+        return render(request, "relay_edit.html", r=relay, relay_id=relay_id, errors=list(errors))
+
+    @app.get("/relays", response_class=HTMLResponse, dependencies=[Depends(auth)])
+    def relay_list(request: Request, saved: int = 0, deleted: int = 0):
+        since = time.time() - 86400
+        usage = {r["relay_name"]: r["n"] for r in db.query(
+            "SELECT relay_name, COUNT(*) AS n FROM messages WHERE received_at >= ? AND relay_name IS NOT NULL "
+            "GROUP BY relay_name", (since,))}
+        return render(request, "relays.html", relays=relays.all(), usage=usage, saved=saved, deleted=deleted)
+
+    @app.get("/relays/new", response_class=HTMLResponse, dependencies=[Depends(auth)])
+    def relay_new(request: Request):
+        return render_relay(request, dict(NEW_RELAY), None)
+
+    @app.post("/relays/new", response_class=HTMLResponse, dependencies=[Depends(auth)])
+    async def relay_create(request: Request):
+        values = relay_form(await request.form())
+        relay_id, errors = relays.save(values)
+        if errors:
+            return render_relay(request, {**NEW_RELAY, **values, "senders": values.get("senders", "").splitlines()},
+                                None, errors)
+        raise Redirect("/relays?saved=1")
+
+    @app.get("/relays/{relay_id}", response_class=HTMLResponse, dependencies=[Depends(auth)])
+    def relay_edit(request: Request, relay_id: int):
+        relay = relays.get(relay_id)
+        if relay is None:
+            raise HTTPException(404, "Relay not found")
+        return render_relay(request, relay, relay_id)
+
+    @app.post("/relays/{relay_id}", response_class=HTMLResponse, dependencies=[Depends(auth)])
+    async def relay_update(request: Request, relay_id: int):
+        relay = relays.get(relay_id)
+        if relay is None:
+            raise HTTPException(404, "Relay not found")
+        values = relay_form(await request.form())
+        _, errors = relays.save(values, relay_id)
+        if errors:
+            return render_relay(request, {**relay, **values, "senders": values.get("senders", "").splitlines()},
+                                relay_id, errors)
+        raise Redirect("/relays?saved=1")
+
+    @app.post("/relays/{relay_id}/delete", dependencies=[Depends(auth)])
+    async def relay_delete(relay_id: int):
+        relays.delete(relay_id)
+        raise Redirect("/relays?deleted=1")
+
+    @app.post("/relays/{relay_id}/test", dependencies=[Depends(auth)])
+    async def relay_test(relay_id: int):
+        relay = relays.get(relay_id)
+        if relay is None:
+            raise HTTPException(404, "Relay not found")
+        session_id, _, _ = await run_connection_test(relay)
+        raise Redirect(f"/sessions/{session_id}")
 
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(auth)])
     def messages(request: Request, q: str = "", status: str = "", page: int = 1):
@@ -266,7 +342,7 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         page = max(page, 1)
         rows = db.query(f"SELECT id, received_at, client_ip, client_name, helo, mail_from, rcpt_to, "
-                        f"from_header, subject, size, status, detail FROM messages {clause} "
+                        f"from_header, subject, size, status, detail, relay_name FROM messages {clause} "
                         f"ORDER BY id DESC LIMIT ? OFFSET ?", (*params, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE))
         since = time.time() - 86400
         stats = {r["status"]: r["n"] for r in db.query(
@@ -274,7 +350,7 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         return render(request, "messages.html", rows=rows[:PAGE_SIZE], has_next=len(rows) > PAGE_SIZE,
                       page=page, q=q, status=status, statuses=STATUSES, stats=stats,
                       qs=lambda **kw: urlencode({"q": q, "status": status, **kw}),
-                      no_senders=not settings.get("allowed_senders"))
+                      no_relays=not relays.all())
 
     @app.get("/messages/{message_id}", response_class=HTMLResponse, dependencies=[Depends(auth)])
     def message_detail(request: Request, message_id: int):
@@ -425,13 +501,11 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
 
     @app.get("/tools", response_class=HTMLResponse, dependencies=[Depends(auth)])
     def tools(request: Request):
-        s = settings.snapshot()
-        return render(request, "tools.html", s=s, default_from=s["rewrite_from_address"] or s["relay_username"])
-
-    @app.post("/tools/test-connection", dependencies=[Depends(auth)])
-    async def tools_test_connection():
-        session_id, _, _ = await test_connection(db, settings.snapshot())
-        return RedirectResponse(f"/sessions/{session_id}", status_code=303)
+        all_relays = relays.all()
+        first = all_relays[0] if all_relays else NEW_RELAY
+        default_from = (first["rewrite_from_address"] if first["rewrite_enabled"] else "") or first["username"]
+        return render(request, "tools.html", s=settings.snapshot(), relays=all_relays, default_from=default_from,
+                      default_to=first["username"])
 
     @app.post("/tools/send-test", dependencies=[Depends(auth)])
     async def tools_send_test(request: Request):
@@ -448,8 +522,9 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         m["Message-ID"] = make_msgid(domain=sender.rsplit("@", 1)[-1])
         m.set_content(str(form.get("body") or "This is a test message from smtp-relay."))
         raw = m.as_bytes(policy=m.policy.clone(linesep="\r\n"))
+        relay_id = int(form["relay_id"]) if str(form.get("relay_id", "")).isdigit() else None
         message_id = queue.accept(raw=raw, mail_from=sender, rcpts=[rcpt], client_ip="WebUI",
-                                  client_name="Test message")
+                                  client_name="Test message", relay_id=relay_id)
         await queue.attempt(message_id)
         return RedirectResponse(f"/messages/{message_id}", status_code=303)
 

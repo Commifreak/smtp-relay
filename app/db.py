@@ -51,6 +51,24 @@ CREATE TABLE IF NOT EXISTS messages (
     raw                BLOB
 );
 CREATE INDEX IF NOT EXISTS ix_messages_received ON messages(received_at);
+CREATE TABLE IF NOT EXISTS relays (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                  TEXT NOT NULL,
+    enabled               INTEGER NOT NULL DEFAULT 1,
+    senders               TEXT NOT NULL DEFAULT '[]',   -- JSON list of sender patterns
+    host                  TEXT NOT NULL,
+    port                  INTEGER NOT NULL,
+    security              TEXT NOT NULL,                -- ssl | starttls | none
+    tls_verify            INTEGER NOT NULL DEFAULT 1,
+    username              TEXT NOT NULL DEFAULT '',
+    password              TEXT NOT NULL DEFAULT '',
+    rewrite_enabled       INTEGER NOT NULL DEFAULT 0,
+    rewrite_from_address  TEXT NOT NULL DEFAULT '',
+    rewrite_name_mode     TEXT NOT NULL DEFAULT 'keep',
+    rewrite_fixed_name    TEXT NOT NULL DEFAULT '',
+    rewrite_set_reply_to  INTEGER NOT NULL DEFAULT 1,
+    rewrite_envelope      INTEGER NOT NULL DEFAULT 1
+);
 CREATE TABLE IF NOT EXISTS web_sessions (
     token_hash  TEXT PRIMARY KEY,
     created_at  REAL NOT NULL,
@@ -69,6 +87,8 @@ MESSAGE_COLUMNS = {
     "delivered_rcpts": "TEXT",         # JSON list
     "failed_rcpts": "TEXT",            # JSON list of "rcpt: reason"
     "is_notification": "INTEGER NOT NULL DEFAULT 0",
+    "relay_id": "INTEGER",              # fixed relay (test messages, notifications); NULL = route by sender
+    "relay_name": "TEXT",               # relay used for the last attempt
 }
 
 MAX_LINE = 4000
