@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 
 from app.auth import set_credentials
 from app.config import Settings
-from app.db import Database
 from app.delivery import DeliveryQueue
+from app.migrations import open_database
 from app.smtp_server import protocol_factory
 from app.web import create_app
 
@@ -76,7 +76,7 @@ def env(tmp_path):
         up_port = sock.getsockname()[1]
     ctrl = Controller(upstream, hostname="127.0.0.1", port=up_port)
     ctrl.start()
-    db = Database(str(tmp_path / "t.db"))
+    db = open_database(str(tmp_path / "t.db"))
     settings = Settings(db)
     assert not settings.update({"relay_timeout": 5, "allowed_networks": ["127.0.0.0/8"]})
     queue = DeliveryQueue(db, settings)

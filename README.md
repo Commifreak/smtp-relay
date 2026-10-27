@@ -168,10 +168,29 @@ the other was temporarily refused and is queued for a retry:
 
 ![Settings](docs/screenshots/settings.png)
 
-### Upgrading from 1.2
+### Upgrades and database migrations
 
-The relay server, allowed senders and sender rewriting of earlier versions are converted into the first relay
-automatically on start; nothing needs to be done.
+Database changes between versions are applied automatically when the container starts. Before that, a backup
+of the database is written to `/data/backups/`, and the pending migrations and their results are printed as a
+block to the container log:
+
+```text
+================================================================
+  smtp-relay – database migrations
+  Pending migrations: 2
+    [2] Add relay columns to messages (1.3)
+    [3] Move the single relay configuration into relays (1.3)
+  Backup: /data/backups/smtp-relay-20261027-101500-schema-1.db
+
+  [2] Add relay columns to messages (1.3): done – added 2 column(s)
+  [3] Move the single relay configuration into relays (1.3): done – created relay “smtp.mailbox.org” from the previous relay settings
+  2 migration(s) applied, schema version 3.
+================================================================
+```
+
+If a migration fails, it is rolled back and the container does not start; the log shows the error. The
+backup can be restored by copying it to `/data/smtp-relay.db`. When upgrading from 1.2, the relay server,
+allowed senders and sender rewriting are converted into the first relay.
 
 ## Multiple relays
 
@@ -285,6 +304,7 @@ Layout:
 - `app/web.py` and `app/templates/`: web UI incl. setup wizard (FastAPI and Jinja2, no external browser
   dependencies)
 - `app/db.py`: SQLite (settings, sessions, transcript lines, messages)
+- `app/migrations.py`: numbered database migrations, reported on container start
 
 The GitHub Action runs the tests on every push and pull request. Pushes to `main` publish the `latest`
 image; pushing a version tag publishes the release tags:
@@ -293,4 +313,5 @@ image; pushing a version tag publishes the release tags:
 git tag v1.3.0 && git push origin v1.3.0   # -> images 1.3.0, 1.3 and 1
 ```
 
-Keep `__version__` in `app/__init__.py` in sync with the tag.
+Keep `__version__` in `app/__init__.py` in sync with the tag. Database changes for existing installations
+are numbered migrations in `app/migrations.py`; see `CLAUDE.md` for the conventions.

@@ -4,8 +4,8 @@ from fastapi.testclient import TestClient
 
 from app.auth import ensure_credentials, hash_password, set_credentials, verify_password
 from app.config import Settings
-from app.db import Database
 from app.delivery import DeliveryQueue
+from app.migrations import open_database
 from app.relays import Relays
 from app.web import create_app
 
@@ -14,7 +14,7 @@ PROXY_IP = "172.18.0.5"
 
 @pytest.fixture
 def settings(tmp_path):
-    return Settings(Database(str(tmp_path / "t.db")))
+    return Settings(open_database(str(tmp_path / "t.db")))
 
 
 def client_for(settings, ip="192.168.1.20"):
