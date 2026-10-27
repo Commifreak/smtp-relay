@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,15 +10,17 @@
 <header class="top">
   <a class="brand" href="/">MTA-Relay</a>
   <nav>
-    <a href="/" class="{{ 'active' if request.url.path == '/' or request.url.path.startswith('/messages') }}">Mail-Historie</a>
-    <a href="/sessions" class="{{ 'active' if request.url.path.startswith('/sessions') }}">SMTP-Sitzungen</a>
-    <a href="/tools" class="{{ 'active' if request.url.path.startswith('/tools') }}">Diagnose</a>
-    <a href="/settings" class="{{ 'active' if request.url.path.startswith('/settings') }}">Einstellungen</a>
+    <a href="/" class="{{ 'active' if request.url.path == '/' or request.url.path.startswith('/messages') }}">Mail history</a>
+    {% set qn = queue_count() %}
+    <a href="/queue" class="{{ 'active' if request.url.path.startswith('/queue') }}">Queue{% if qn %} <span class="count">{{ qn }}</span>{% endif %}</a>
+    <a href="/sessions" class="{{ 'active' if request.url.path.startswith('/sessions') }}">SMTP sessions</a>
+    <a href="/tools" class="{{ 'active' if request.url.path.startswith('/tools') }}">Diagnostics</a>
+    <a href="/settings" class="{{ 'active' if request.url.path.startswith('/settings') }}">Settings</a>
   </nav>
-  <label class="live"><input type="checkbox" id="autorefresh"> Auto-Refresh</label>
+  <label class="live"><input type="checkbox" id="autorefresh"> Auto-refresh</label>
 </header>
 <main>
-{% if auth_disabled %}<div class="alert warn">Das WebUI ist nicht passwortgeschützt. Setze <code>WEBUI_PASSWORD</code>, um den Zugriff zu beschränken.</div>{% endif %}
+{% if auth_disabled %}<div class="alert warn">The web UI is not password protected. Set <code>WEBUI_PASSWORD</code> to restrict access.</div>{% endif %}
 {% block content %}{% endblock %}
 </main>
 <footer>MTA-Relay {{ version }}</footer>

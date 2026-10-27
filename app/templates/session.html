@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% from "_macros.html" import badge, transcript, session_head %}
-{% block title %}Sitzung #{{ s.id }}{% endblock %}
+{% block title %}Session #{{ s.id }}{% endblock %}
 {% block content %}
-<h1>SMTP-Sitzung #{{ s.id }}</h1>
+<h1>SMTP session #{{ s.id }}</h1>
 <p class="meta">{{ session_head(s) }}{% if s.helo %} · HELO {{ s.helo }}{% endif %}</p>
 {% if msgs %}
-<p>Nachrichten: {% for m in msgs %}<a href="/messages/{{ m.id }}">#{{ m.id }}</a> {{ m.mail_from }}{% if m.subject %} – „{{ m.subject }}“{% endif %} {{ badge(m.status) }}{{ ' · ' if not loop.last }}{% endfor %}</p>
+<p>Messages: {% for m in msgs %}<a href="/messages/{{ m.id }}">#{{ m.id }}</a> {{ m.mail_from }}{% if m.subject %} – “{{ m.subject }}”{% endif %} {{ badge(m.status) }}{{ ' · ' if not loop.last }}{% endfor %}</p>
 {% endif %}
 {{ transcript(s) }}
 {% endblock %}

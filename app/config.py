@@ -31,6 +31,10 @@ DEFAULTS: dict = {
     "add_missing_headers": True,
     "store_content": True,
     "retention_days": 30,
+    "retry_intervals": "1, 5, 15, 30, 60",  # minutes; the last value repeats
+    "queue_max_age_hours": 48,
+    "queue_paused": False,
+    "notify_address": "",
 }
 
 LIST_KEYS = {"allowed_networks", "allowed_senders", "allowed_recipients"}
@@ -48,7 +52,7 @@ def _parse_env(key: str, raw: str):
     if key in LIST_KEYS:
         return [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
     if isinstance(default, bool):
-        return raw.strip().lower() in ("1", "true", "yes", "on", "ja")
+        return raw.strip().lower() in ("1", "true", "yes", "on")
     if isinstance(default, int):
         return int(raw)
     return raw
@@ -76,7 +80,7 @@ def validate(values: dict) -> tuple[dict, list[str]]:
             else:
                 value = str(value).strip()
         except (TypeError, ValueError):
-            errors.append(f"{key}: ungültiger Wert")
+            errors.append(f"{key}: invalid value")
             continue
         clean[key] = value
 
@@ -84,24 +88,33 @@ def validate(values: dict) -> tuple[dict, list[str]]:
         try:
             ipaddress.ip_network(net, strict=False)
         except ValueError:
-            errors.append(f"Ungültiges Netz: {net}")
+            errors.append(f"Invalid network: {net}")
     for key in ("allowed_senders", "allowed_recipients"):
         if key in clean:
             clean[key] = [p.lower() for p in clean[key]]
             for p in clean[key]:
                 if not PATTERN_RE.match(p):
-                    errors.append(f"Ungültiges Adressmuster: {p}")
+                    errors.append(f"Invalid address pattern: {p}")
     if "relay_port" in clean and not 1 <= clean["relay_port"] <= 65535:
-        errors.append("Relay-Port muss zwischen 1 und 65535 liegen")
+        errors.append("Relay port must be between 1 and 65535")
     if clean.get("relay_security", "ssl") not in SECURITY_MODES:
-        errors.append("Ungültiger Verschlüsselungsmodus")
+        errors.append("Invalid encryption mode")
     if clean.get("rewrite_name_mode", "keep") not in NAME_MODES:
-        errors.append("Ungültiger Namensmodus")
+        errors.append("Invalid display name mode")
     if clean.get("rewrite_enabled") and not ADDRESS_RE.match(clean.get("rewrite_from_address", "")):
-        errors.append("Für das Umschreiben wird eine gültige Absenderadresse benötigt")
+        errors.append("Rewriting requires a valid sender address")
+    if "retry_intervals" in clean:
+        try:
+            clean["retry_intervals"] = ", ".join(str(m) for m in parse_intervals(clean["retry_intervals"]))
+        except ValueError:
+            errors.append("Retry intervals: enter comma-separated minutes greater than 0, e.g. 1, 5, 15, 60")
+    if clean.get("notify_address") and not ADDRESS_RE.match(clean["notify_address"]):
+        errors.append("Invalid notification address")
+    if "queue_max_age_hours" in clean and clean["queue_max_age_hours"] < 1:
+        errors.append("Maximum queue lifetime must be at least 1 hour")
     for key in ("retention_days", "max_message_size_mb", "relay_timeout"):
         if key in clean and clean[key] < 0:
-            errors.append(f"{key} darf nicht negativ sein")
+            errors.append(f"{key} must not be negative")
     return clean, errors
 
 
@@ -141,6 +154,14 @@ class Settings:
             self._data = merged
         self.db.save_settings(merged)
         return []
+
+
+def parse_intervals(value: str) -> list[int]:
+    """Parse '1, 5, 15' into minutes. Raises ValueError on invalid input."""
+    minutes = [int(p) for p in re.split(r"[,;\s]+", str(value)) if p]
+    if not minutes or any(m <= 0 for m in minutes):
+        raise ValueError(value)
+    return minutes
 
 
 def address_matches(address: str, patterns: list[str]) -> bool:

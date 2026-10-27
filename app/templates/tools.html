@@ -1,28 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Diagnose{% endblock %}
+{% block title %}Diagnostics{% endblock %}
 {% block content %}
-<h1>Diagnose</h1>
+<h1>Diagnostics</h1>
 <fieldset>
-  <legend>Verbindung zum Relay testen</legend>
-  <p>Baut eine Verbindung zu <strong>{{ s.relay_host }}:{{ s.relay_port }}</strong> ({{ s.relay_security }}) auf, meldet sich {% if s.relay_username %}als <strong>{{ s.relay_username }}</strong> {% endif %}an und zeigt den kompletten SMTP-Dialog an. Es wird keine Mail verschickt.</p>
-  <form method="post" action="/tools/test-connection"><button class="primary">Verbindung testen</button></form>
+  <legend>Test relay connection</legend>
+  <p>Connects to <strong>{{ s.relay_host }}:{{ s.relay_port }}</strong> ({{ s.relay_security }}), logs in{% if s.relay_username %} as <strong>{{ s.relay_username }}</strong>{% endif %} and shows the full SMTP conversation. No mail is sent.</p>
+  <form method="post" action="/tools/test-connection"><button class="primary">Test connection</button></form>
 </fieldset>
 <fieldset>
-  <legend>Testmail senden</legend>
-  <p class="hint">Wird direkt über das Relay verschickt (inkl. Absender-Umschreibung). Die Absenderliste gilt hier nicht.</p>
+  <legend>Send test message</legend>
+  <p class="hint">Sent directly through the relay (including sender rewriting). The sender allowlist does not apply here.</p>
   <form method="post" action="/tools/send-test" class="settings">
     <div class="row">
-      <label>Von<input name="from" value="{{ default_from }}" required></label>
-      <label>An<input name="to" value="{{ s.relay_username }}" required></label>
+      <label>From<input name="from" value="{{ default_from }}" required></label>
+      <label>To<input name="to" value="{{ s.relay_username }}" required></label>
     </div>
-    <label>Betreff<input name="subject" value="MTA-Relay Testmail"></label>
-    <label>Text<textarea name="body" rows="4">Dies ist eine Testmail von MTA-Relay.</textarea></label>
-    <button class="primary">Testmail senden</button>
+    <label>Subject<input name="subject" value="MTA-Relay test message"></label>
+    <label>Text<textarea name="body" rows="4">This is a test message from MTA-Relay.</textarea></label>
+    <button class="primary">Send test message</button>
   </form>
 </fieldset>
 <fieldset>
-  <legend>Test aus dem lokalen Netz</legend>
-  <p>Von einem Rechner im Netz, z. B. mit <code>swaks</code>:</p>
-  <pre class="body">swaks --server &lt;docker-host&gt;:25 --from {{ (s.allowed_senders[0] if s.allowed_senders and '@' in s.allowed_senders[0] and not s.allowed_senders[0].startswith(('@', '*')) else 'dienst@example.de') }} --to {{ s.relay_username or 'du@example.de' }} --header "Subject: Test"</pre>
+  <legend>Test from the local network</legend>
+  <p>From a machine on your network, e.g. with <code>swaks</code>:</p>
+  <pre class="body">swaks --server &lt;docker-host&gt;:25 --from {{ (s.allowed_senders[0] if s.allowed_senders and '@' in s.allowed_senders[0] and not s.allowed_senders[0].startswith(('@', '*')) else 'service@example.com') }} --to {{ s.relay_username or 'you@example.com' }} --header "Subject: Test"</pre>
 </fieldset>
 {% endblock %}

@@ -1,6 +1,5 @@
 """Inbound SMTP server for the local network with full protocol transcript."""
 import asyncio
-import json
 import logging
 import socket
 
@@ -8,8 +7,7 @@ from aiosmtpd.smtp import SMTP
 
 from .config import Settings, address_matches, ip_allowed, normalize_ip
 from .db import Database, Transcript
-from .relay import deliver
-from .rewrite import header_meta
+from .delivery import DeliveryQueue
 
 log = logging.getLogger("mta-relay.smtp")
 
@@ -37,7 +35,7 @@ class LoggingSMTP(SMTP):
             self.client_ip = normalize_ip(peer[0])
             self.db_session_id = self.db.create_session("inbound", peer=f"{self.client_ip}:{peer[1]}")
             self.transcript = Transcript(self.db, self.db_session_id)
-            self.transcript.info(f"Verbindung von {self.client_ip}:{peer[1]}")
+            self.transcript.info(f"Connection from {self.client_ip}:{peer[1]}")
             super().connection_made(transport)
             self.loop.create_task(self._resolve_peer())
         else:
@@ -45,7 +43,7 @@ class LoggingSMTP(SMTP):
             super().connection_made(transport)
             ssl_obj = transport.get_extra_info("ssl_object")
             if ssl_obj is not None:
-                self.transcript.info(f"STARTTLS ausgehandelt: {ssl_obj.version()}, Cipher {ssl_obj.cipher()[0]}")
+                self.transcript.info(f"STARTTLS negotiated: {ssl_obj.version()}, cipher {ssl_obj.cipher()[0]}")
 
     async def _resolve_peer(self):
         try:
@@ -55,13 +53,13 @@ class LoggingSMTP(SMTP):
             self.db.update_session(self.db_session_id, peer_name=name)
             self.transcript.info(f"Reverse DNS: {self.client_ip} → {name}")
         except Exception:
-            self.transcript.info(f"Reverse DNS: kein PTR-Eintrag für {self.client_ip}")
+            self.transcript.info(f"Reverse DNS: no PTR record for {self.client_ip}")
 
     def connection_lost(self, exc):
         if self.transcript is not None:
             if self._rxbuf.strip():
-                self.transcript.client(self._rxbuf.decode("utf-8", "replace") + " [unvollständig]")
-            self.transcript.info("Verbindung geschlossen" + (f": {exc}" if exc else ""))
+                self.transcript.client(self._rxbuf.decode("utf-8", "replace") + " [incomplete]")
+            self.transcript.info("Connection closed" + (f": {exc}" if exc else ""))
             self.db.end_session(self.db_session_id)
         super().connection_lost(exc)
 
@@ -77,7 +75,7 @@ class LoggingSMTP(SMTP):
             line = line.rstrip(b"\r")
             if self._in_data:
                 if line == b".":
-                    t.client(f"[Nachrichteninhalt: {self._data_bytes} Bytes, {self._data_lines} Zeilen]")
+                    t.client(f"[message content: {self._data_bytes} bytes, {self._data_lines} lines]")
                     t.client(".")
                     self._in_data = False
                 else:
@@ -89,16 +87,16 @@ class LoggingSMTP(SMTP):
             if self._in_data:
                 self._data_bytes += len(self._rxbuf)
             else:
-                t.client(self._rxbuf[:200].decode("utf-8", "replace") + f" … [Zeile zu lang, {len(self._rxbuf)} Bytes]")
+                t.client(self._rxbuf[:200].decode("utf-8", "replace") + f" … [line too long, {len(self._rxbuf)} bytes]")
             self._rxbuf = b""
 
     def _mask(self, line: str) -> str:
         parts = line.split(" ")
         if parts[0].upper() == "AUTH":
             self._auth_pending = True
-            return f"{parts[0]} {parts[1]} ******** (maskiert)" if len(parts) > 2 else line
+            return f"{parts[0]} {parts[1]} ******** (masked)" if len(parts) > 2 else line
         if self._auth_pending:
-            return "******** (maskiert)"
+            return "******** (masked)"
         return line
 
     async def push(self, status):
@@ -115,8 +113,8 @@ class LoggingSMTP(SMTP):
     async def _handle_client(self):
         networks = self.settings.get("allowed_networks")
         if not ip_allowed(self.client_ip, networks):
-            self.transcript.error(f"Client-IP {self.client_ip} ist nicht in den erlaubten Netzen")
-            self.db.update_session(self.db_session_id, result="abgelehnt: Netz")
+            self.transcript.error(f"Client IP {self.client_ip} is not in the allowed networks")
+            self.db.update_session(self.db_session_id, result="rejected: network")
             await self.push(f"554 5.7.1 Client {self.client_ip} not allowed to relay")
             self.transport.close()
             return
@@ -124,11 +122,12 @@ class LoggingSMTP(SMTP):
 
 
 class RelayHandler:
-    """aiosmtpd handler enforcing sender/recipient policy and relaying synchronously."""
+    """aiosmtpd handler enforcing sender/recipient policy; accepted mail goes to the delivery queue."""
 
-    def __init__(self, db: Database, settings: Settings):
+    def __init__(self, db: Database, settings: Settings, queue: DeliveryQueue):
         self.db = db
         self.settings = settings
+        self.queue = queue
 
     async def handle_EHLO(self, server, session, envelope, hostname, responses):
         session.host_name = hostname
@@ -143,13 +142,13 @@ class RelayHandler:
     async def handle_MAIL(self, server, session, envelope, address, mail_options):
         allowed = self.settings.get("allowed_senders")
         if not address_matches(address, allowed):
-            reason = "Absenderliste ist leer" if not allowed else "nicht in der Absenderliste"
-            server.transcript.error(f"Absender <{address}> abgelehnt ({reason})")
+            reason = "sender list is empty" if not allowed else "not in the sender list"
+            server.transcript.error(f"Sender <{address}> rejected ({reason})")
             self.db.insert_message(session_id=server.db_session_id, client_ip=server.client_ip,
                                    client_name=server.client_name, helo=session.host_name,
                                    mail_from=address, rcpt_to="[]", status="rejected",
-                                   detail=f"Absender nicht erlaubt ({reason})")
-            self.db.update_session(server.db_session_id, result="abgelehnt: Absender")
+                                   detail=f"Sender not allowed ({reason})")
+            self.db.update_session(server.db_session_id, result="rejected: sender")
             return f"550 5.7.1 Sender address <{address}> not allowed"
         envelope.mail_from = address
         envelope.mail_options.extend(mail_options)
@@ -158,8 +157,8 @@ class RelayHandler:
     async def handle_RCPT(self, server, session, envelope, address, rcpt_options):
         allowed = self.settings.get("allowed_recipients")
         if allowed and not address_matches(address, allowed):
-            server.transcript.error(f"Empfänger <{address}> abgelehnt (nicht in der Empfängerliste)")
-            self.db.update_session(server.db_session_id, result="abgelehnt: Empfänger")
+            server.transcript.error(f"Recipient <{address}> rejected (not in the recipient list)")
+            self.db.update_session(server.db_session_id, result="rejected: recipient")
             return f"550 5.7.1 Recipient address <{address}> not allowed"
         envelope.rcpt_tos.append(address)
         envelope.rcpt_options.extend(rcpt_options)
@@ -169,26 +168,21 @@ class RelayHandler:
         raw = envelope.original_content or envelope.content
         if isinstance(raw, str):
             raw = raw.encode("utf-8", "surrogateescape")
-        settings = self.settings.snapshot()
-        meta = header_meta(raw)
-        message_id = self.db.insert_message(
+        message_id = self.queue.accept(
+            raw=raw, mail_from=envelope.mail_from, rcpts=list(envelope.rcpt_tos),
             session_id=server.db_session_id, client_ip=server.client_ip, client_name=server.client_name,
-            helo=session.host_name, mail_from=envelope.mail_from, rcpt_to=json.dumps(envelope.rcpt_tos),
-            size=len(raw), status="received", raw=raw if settings["store_content"] else None, **meta)
-        server.transcript.info(f"Nachricht #{message_id} angenommen ({len(raw)} Bytes), leite an "
-                               f"{settings['relay_host']} weiter …")
-        trace = {"helo": session.host_name, "client_name": server.client_name, "client_ip": server.client_ip,
-                 "id": message_id, "rcpt": envelope.rcpt_tos[0]}
-        result = await deliver(self.db, settings, message_id, raw, envelope.mail_from, envelope.rcpt_tos,
-                               trace, smtputf8=envelope.smtp_utf8)
-        (server.transcript.info if result.status in ("relayed", "partial") else server.transcript.error)(
-            f"Nachricht #{message_id}: {result.status} – {result.detail}")
+            helo=session.host_name)
+        server.transcript.info(f"Message #{message_id} stored ({len(raw)} bytes), first delivery attempt to "
+                               f"{self.settings.get('relay_host')} …")
+        result = await self.queue.attempt(message_id)
+        log_line = server.transcript.error if result.status == "failed" else server.transcript.info
+        log_line(f"Message #{message_id}: {result.status} – {result.detail}")
         self.db.update_session(server.db_session_id, result=result.status)
-        return result.smtp_response()
+        return result.smtp_response(message_id)
 
 
-def protocol_factory(db: Database, settings: Settings, tls_context=None):
-    handler = RelayHandler(db, settings)
+def protocol_factory(db: Database, settings: Settings, queue: DeliveryQueue, tls_context=None):
+    handler = RelayHandler(db, settings, queue)
 
     def factory():
         size = settings.get("max_message_size_mb")

@@ -1,13 +1,9 @@
-"""Outbound delivery to the upstream relay (e.g. mailbox.org) with full protocol transcript."""
+"""SMTP transport to the upstream relay (e.g. mailbox.org) with full protocol transcript."""
 import asyncio
-import json
 import smtplib
 import ssl
-import time
-from dataclasses import dataclass
 
 from .db import Database, Transcript
-from .rewrite import prepare
 
 
 class _TranscriptMixin:
@@ -23,7 +19,7 @@ class _TranscriptMixin:
         if t is not None:
             text = s.decode("utf-8", "replace") if isinstance(s, bytes) else s
             if self._sending_data and text.lower() != "data\r\n":
-                t.client(f"[Nachrichteninhalt: {len(s)} Bytes]")
+                t.client(f"[message content: {len(s)} bytes]")
                 t.client(".")
             else:
                 for line in text.rstrip("\r\n").split("\r\n"):
@@ -35,10 +31,10 @@ class _TranscriptMixin:
         if parts[0].upper() == "AUTH":
             self._auth_pending = True
             if len(parts) > 2:
-                return f"{parts[0]} {parts[1]} ******** (maskiert)"
+                return f"{parts[0]} {parts[1]} ******** (masked)"
             return line
         if self._auth_pending:
-            return "******** (maskiert)"
+            return "******** (masked)"
         return line
 
     def getreply(self):
@@ -75,12 +71,12 @@ def _tls_info(sock) -> str:
         cert = sock.getpeercert() or {}
         subject = dict(x[0] for x in cert.get("subject", ()))
         issuer = dict(x[0] for x in cert.get("issuer", ()))
-        info = f"TLS aktiv: {sock.version()}, Cipher {cipher[0]}"
+        info = f"TLS active: {sock.version()}, cipher {cipher[0]}"
         if subject:
-            info += f", Zertifikat CN={subject.get('commonName')} (Aussteller: {issuer.get('organizationName') or issuer.get('commonName')})"
+            info += f", certificate CN={subject.get('commonName')} (issuer: {issuer.get('organizationName') or issuer.get('commonName')})"
         return info
     except Exception:
-        return "TLS aktiv"
+        return "TLS active"
 
 
 def _connect(settings: dict, t: Transcript):
@@ -89,9 +85,9 @@ def _connect(settings: dict, t: Transcript):
     if not settings.get("relay_tls_verify", True):
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        t.info("Achtung: TLS-Zertifikatsprüfung ist deaktiviert")
+        t.info("Warning: TLS certificate verification is disabled")
     kwargs = {"local_hostname": settings["smtp_hostname"], "timeout": settings.get("relay_timeout") or 30}
-    t.info(f"Verbinde zu {host}:{port} (Modus: {security})")
+    t.info(f"Connecting to {host}:{port} (mode: {security})")
     if security == "ssl":
         s = LoggingSMTP_SSL(context=ctx, **kwargs)
     else:
@@ -100,7 +96,7 @@ def _connect(settings: dict, t: Transcript):
     s.connect(host, port)
     peer = s.sock.getpeername() if s.sock else None
     if peer:
-        t.info(f"TCP-Verbindung hergestellt zu {peer[0]}:{peer[1]}")
+        t.info(f"TCP connection established to {peer[0]}:{peer[1]}")
     if security == "ssl":
         t.info(_tls_info(s.sock))
     s.ehlo()
@@ -110,7 +106,7 @@ def _connect(settings: dict, t: Transcript):
         s.ehlo()
     if settings.get("relay_username"):
         s.login(settings["relay_username"], settings.get("relay_password", ""))
-        t.info("Authentifizierung erfolgreich")
+        t.info("Authentication successful")
     return s
 
 
@@ -119,7 +115,7 @@ def _quit(s, t: Transcript) -> None:
         s.quit()
     except Exception:
         s.close()
-    t.info("Verbindung geschlossen")
+    t.info("Connection closed")
 
 
 def send_sync(settings: dict, envelope_from: str, rcpts: list[str], data: bytes,
@@ -146,80 +142,10 @@ def test_connection_sync(settings: dict, t: Transcript) -> None:
         _quit(s, t)
 
 
-@dataclass
-class DeliveryResult:
-    status: str        # relayed | partial | deferred | failed
-    code: int
-    detail: str
-
-    def smtp_response(self) -> str:
-        text = _ascii(self.detail)[:200]
-        if self.status in ("relayed", "partial"):
-            return f"250 2.0.0 Ok: relayed ({text})"
-        if self.status == "deferred":
-            return f"451 4.4.1 Relay temporarily failed: {text}"
-        code = self.code if 500 <= self.code < 600 else 554
-        return f"{code} 5.0.0 Relay rejected: {text}"
-
-
-def _ascii(text: str) -> str:
-    return " ".join(text.encode("ascii", "replace").decode().split())
-
-
-def _reply_text(code: int, msg: bytes | str) -> str:
+def reply_text(code: int, msg: bytes | str) -> str:
     if isinstance(msg, bytes):
         msg = msg.decode("utf-8", "replace")
     return f"{code} {' '.join(msg.split())}"
-
-
-async def deliver(db: Database, settings: dict, message_id: int, raw: bytes, mail_from: str,
-                  rcpts: list[str], trace: dict | None = None, smtputf8: bool = False) -> DeliveryResult:
-    data, envelope_from, notes = prepare(raw, mail_from, settings, trace)
-    session_id = db.create_session("outbound", peer=f"{settings['relay_host']}:{settings['relay_port']}",
-                                   message_id=message_id)
-    t = Transcript(db, session_id)
-    for note in notes:
-        t.info(note)
-    db.update_message(message_id, status="relaying", relay_from=envelope_from)
-    started = time.time()
-    try:
-        refused, reply = await asyncio.to_thread(send_sync, settings, envelope_from, rcpts, data, t, smtputf8)
-        upstream = _reply_text(*reply) if reply else "ok"
-        if refused:
-            rej = ", ".join(f"{r}: {_reply_text(*v)}" for r, v in refused.items())
-            result = DeliveryResult("partial", 250, f"{upstream}; abgelehnt: {rej}")
-        else:
-            result = DeliveryResult("relayed", 250, upstream)
-    except smtplib.SMTPRecipientsRefused as e:
-        codes = [c for c, _ in e.recipients.values()]
-        rej = "; ".join(f"{r}: {_reply_text(*v)}" for r, v in e.recipients.items())
-        temporary = all(400 <= c < 500 for c in codes)
-        result = DeliveryResult("deferred" if temporary else "failed", max(codes or [550]),
-                                f"Alle Empfänger abgelehnt: {rej}")
-    except smtplib.SMTPResponseException as e:
-        temporary = 400 <= e.smtp_code < 500
-        result = DeliveryResult("deferred" if temporary else "failed", e.smtp_code,
-                                f"{type(e).__name__}: {_reply_text(e.smtp_code, e.smtp_error)}")
-    except (smtplib.SMTPException, OSError) as e:
-        result = DeliveryResult("deferred", 451, f"{type(e).__name__}: {e}")
-    if result.status in ("deferred", "failed"):
-        t.error(result.detail)
-    else:
-        t.info(f"Zustellung an Relay erfolgreich ({time.time() - started:.2f}s)")
-    db.end_session(session_id, result.status)
-    db.update_message(message_id, status=result.status, detail=result.detail,
-                      relayed_at=time.time() if result.status in ("relayed", "partial") else None)
-    return result
-
-
-async def resend(db: Database, settings: dict, message_id: int) -> DeliveryResult | None:
-    row = db.query_one("SELECT * FROM messages WHERE id = ?", (message_id,))
-    if not row or not row["raw"]:
-        return None
-    trace = {"helo": row["helo"], "client_name": row["client_name"], "client_ip": row["client_ip"],
-             "id": message_id, "rcpt": json.loads(row["rcpt_to"] or "[]")[0] if row["rcpt_to"] else ""}
-    return await deliver(db, settings, message_id, row["raw"], row["mail_from"],
-                         json.loads(row["rcpt_to"] or "[]"), trace)
 
 
 async def test_connection(db: Database, settings: dict) -> tuple[int, bool, str]:
@@ -227,10 +153,10 @@ async def test_connection(db: Database, settings: dict) -> tuple[int, bool, str]
     t = Transcript(db, session_id)
     try:
         await asyncio.to_thread(test_connection_sync, settings, t)
-        ok, detail = True, "Verbindung und Anmeldung erfolgreich"
+        ok, detail = True, "Connection and login successful"
         t.info(detail)
     except Exception as e:
         ok, detail = False, f"{type(e).__name__}: {e}"
         t.error(detail)
-    db.end_session(session_id, "ok" if ok else "fehler")
+    db.end_session(session_id, "ok" if ok else "error")
     return session_id, ok, detail

@@ -96,3 +96,6 @@ legend { font-weight: 700; padding: 0 6px; }
   table.list th:nth-child(7), table.list td:nth-child(7) { display: none; }
   main { padding: 12px; }
 }
+.count { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--warn-bg); color: var(--warn); font-size: 12px; font-weight: 700; text-align: center; }
+.st-queued { background: var(--warn-bg); color: var(--warn); }
+form.inline { display: inline; margin: 0; }
