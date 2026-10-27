@@ -137,12 +137,13 @@ docker compose pull && docker compose up -d
 |-------------|--------------------------------------------------------------------------|
 | `1`         | Latest 1.x release – **default in `docker-compose.yml`**, never jumps to 2.x |
 | `1.3`       | Latest 1.3.x release (bug fixes only)                                    |
-| `1.3.0`     | Exactly this release                                                     |
+| `1.3.1`     | Exactly this release                                                     |
 | `latest`    | Latest build of the `main` branch (may contain unreleased changes)       |
-| `sha-…`     | A specific commit                                                        |
 
 Pinning the major version means a future 2.0 with breaking changes will not be installed automatically;
-switch to `:2` deliberately after reading the release notes.
+switch to `:2` deliberately after reading the release notes. To pin one exact build, use its digest
+(`ghcr.io/commifreak/smtp-relay@sha256:…`); the commit an image was built from is stored in its
+`org.opencontainers.image.revision` label.
 
 ### Building from source
 
