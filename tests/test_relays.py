@@ -3,13 +3,13 @@ import json
 
 import pytest
 
-from app.db import Database
+from app.migrations import open_database
 from app.relays import Relays
 
 
 @pytest.fixture
 def relays(tmp_path):
-    return Relays(Database(str(tmp_path / "t.db")))
+    return Relays(open_database(str(tmp_path / "t.db")))
 
 
 def add(relays, name, senders, **kw):

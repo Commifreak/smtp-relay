@@ -1,5 +1,6 @@
 """SQLite persistence for settings, SMTP sessions, transcripts and messages."""
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -69,6 +70,11 @@ CREATE TABLE IF NOT EXISTS relays (
     rewrite_set_reply_to  INTEGER NOT NULL DEFAULT 1,
     rewrite_envelope      INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    applied_at  REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS web_sessions (
     token_hash  TEXT PRIMARY KEY,
     created_at  REAL NOT NULL,
@@ -77,36 +83,19 @@ CREATE TABLE IF NOT EXISTS web_sessions (
 CREATE INDEX IF NOT EXISTS ix_messages_session ON messages(session_id);
 """
 
-# Columns added after the first release; applied to new and existing databases.
-MESSAGE_COLUMNS = {
-    "attempts": "INTEGER NOT NULL DEFAULT 0",
-    "queued_at": "REAL",               # start of the queue lifetime
-    "next_attempt_at": "REAL",
-    "last_attempt_at": "REAL",
-    "pending_rcpts": "TEXT",           # JSON list: recipients still to deliver
-    "delivered_rcpts": "TEXT",         # JSON list
-    "failed_rcpts": "TEXT",            # JSON list of "rcpt: reason"
-    "is_notification": "INTEGER NOT NULL DEFAULT 0",
-    "relay_id": "INTEGER",              # fixed relay (test messages, notifications); NULL = route by sender
-    "relay_name": "TEXT",               # relay used for the last attempt
-}
-
 MAX_LINE = 4000
 
 
 class Database:
     def __init__(self, path: str):
+        """Open the database with its base schema; app.migrations brings it up to date."""
+        self.created = path == ":memory:" or not os.path.exists(path)
         self.lock = threading.RLock()
         self.conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.executescript(SCHEMA)
-        existing = {r["name"] for r in self.conn.execute("PRAGMA table_info(messages)")}
-        for name, decl in MESSAGE_COLUMNS.items():
-            if name not in existing:
-                self.conn.execute(f"ALTER TABLE messages ADD COLUMN {name} {decl}")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS ix_messages_queue ON messages(status, next_attempt_at)")
 
     def execute(self, sql: str, params=()) -> sqlite3.Cursor:
         with self.lock:

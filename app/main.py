@@ -11,6 +11,7 @@ from .auth import ensure_credentials
 from .config import Settings
 from .db import Database
 from .delivery import DeliveryQueue
+from .migrations import MigrationError, migrate
 from .relays import Relays
 from .smtp_server import protocol_factory
 from .web import create_app
@@ -45,13 +46,20 @@ async def main() -> None:
     data_dir = os.environ.get("DATA_DIR", "/data")
     os.makedirs(data_dir, exist_ok=True)
     db_path = os.path.join(data_dir, "smtp-relay.db")
+    notes = []
     for suffix in ("", "-wal", "-shm"):  # database of releases named "MTA-Relay"
         old = os.path.join(data_dir, "mta-relay.db" + suffix)
         if os.path.exists(old) and not os.path.exists(db_path + suffix):
             os.rename(old, db_path + suffix)
+            notes.append(f"Renamed {os.path.basename(old)} to {os.path.basename(db_path + suffix)}")
     db = Database(db_path)
-    if Relays(db).migrate_single_relay():
-        log.info("Moved the relay settings of the previous version into the first relay")
+    try:
+        migrate(db, data_dir, out=lambda line: print(line, flush=True), notes=notes)
+    except MigrationError as exc:
+        log.critical("%s", exc)
+        raise SystemExit(1)
+    if db.created:
+        log.info("Created a new database at %s", db_path)
     settings = Settings(db)
     reset = os.environ.get("RESET_ADMIN_PASSWORD", "").lower() in ("1", "true", "yes")
     ensure_credentials(settings, reset=reset)
