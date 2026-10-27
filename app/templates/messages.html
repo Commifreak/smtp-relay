@@ -2,7 +2,7 @@
 {% from "_macros.html" import badge %}
 {% block title %}Mail history{% endblock %}
 {% block content %}
-{% if no_senders %}<div class="alert warn">No allowed senders are configured – all mail is rejected. <a href="/settings">Open settings</a></div>{% endif %}
+{% if no_relays %}<div class="alert warn">No relay is configured – all mail is rejected. <a href="/relays/new">Add a relay</a></div>{% endif %}
 <div class="stats">
   <span class="muted">Last 24 h:</span>
   {% for st in statuses if stats.get(st) %}<a href="/?{{ qs(status=st, page=1) }}">{{ badge(st) }} {{ stats[st] }}</a>{% else %}<span class="muted">no mail</span>{% endfor %}
@@ -27,7 +27,7 @@
   <td>{{ (m.rcpt_to|fromjson)|join(', ') }}</td>
   <td>{{ m.subject or '' }}</td>
   <td class="nowrap">{{ m.size|size }}</td>
-  <td>{{ badge(m.status) }}{% if m.status in ('failed', 'deferred', 'rejected', 'partial', 'queued') and m.detail %}<div class="sub err">{{ m.detail|truncate(90) }}</div>{% endif %}</td>
+  <td>{{ badge(m.status) }}{% if m.relay_name %} <span class="sub">via {{ m.relay_name }}</span>{% endif %}{% if m.status in ('failed', 'deferred', 'rejected', 'partial', 'queued') and m.detail %}<div class="sub err">{{ m.detail|truncate(90) }}</div>{% endif %}</td>
 </tr>
 {% else %}
 <tr><td colspan="8" class="muted center">No messages found.</td></tr>

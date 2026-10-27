@@ -2,6 +2,7 @@ import email
 import email.policy
 
 from app.config import DEFAULTS
+from app.relays import NEW_RELAY, as_settings
 from app.rewrite import header_meta, prepare
 
 RAW = (b"From: =?utf-8?q?Zo=C3=AB=27s_NAS?= <nas@intern.lan>\r\n"
@@ -12,7 +13,7 @@ RAW = (b"From: =?utf-8?q?Zo=C3=AB=27s_NAS?= <nas@intern.lan>\r\n"
 
 
 def settings(**kw):
-    return {**DEFAULTS, **kw}
+    return {**DEFAULTS, **as_settings({**NEW_RELAY}), **kw}
 
 
 def parse(data):

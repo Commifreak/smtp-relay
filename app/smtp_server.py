@@ -140,9 +140,9 @@ class RelayHandler:
         return f"250 {server.hostname}"
 
     async def handle_MAIL(self, server, session, envelope, address, mail_options):
-        allowed = self.settings.get("allowed_senders")
-        if not address_matches(address, allowed):
-            reason = "sender list is empty" if not allowed else "not in the sender list"
+        relay, pattern = self.queue.relays.route(address)
+        if relay is None:
+            reason = "no relay configured for this sender"
             server.transcript.error(f"Sender <{address}> rejected ({reason})")
             self.db.insert_message(session_id=server.db_session_id, client_ip=server.client_ip,
                                    client_name=server.client_name, helo=session.host_name,
@@ -150,6 +150,7 @@ class RelayHandler:
                                    detail=f"Sender not allowed ({reason})")
             self.db.update_session(server.db_session_id, result="rejected: sender")
             return f"550 5.7.1 Sender address <{address}> not allowed"
+        server.transcript.info(f"Sender <{address}> matches {pattern} → relay “{relay['name']}”")
         envelope.mail_from = address
         envelope.mail_options.extend(mail_options)
         return "250 2.1.0 Ok"
@@ -172,8 +173,7 @@ class RelayHandler:
             raw=raw, mail_from=envelope.mail_from, rcpts=list(envelope.rcpt_tos),
             session_id=server.db_session_id, client_ip=server.client_ip, client_name=server.client_name,
             helo=session.host_name)
-        server.transcript.info(f"Message #{message_id} stored ({len(raw)} bytes), first delivery attempt to "
-                               f"{self.settings.get('relay_host')} …")
+        server.transcript.info(f"Message #{message_id} stored ({len(raw)} bytes), first delivery attempt …")
         result = await self.queue.attempt(message_id)
         log_line = server.transcript.error if result.status == "failed" else server.transcript.info
         log_line(f"Message #{message_id}: {result.status} – {result.detail}")

@@ -21,11 +21,11 @@ def test_ip_allowed():
 
 
 def test_validate():
-    clean, errors = validate({"allowed_senders": "a@b.de\n@c.de\n", "relay_port": "587"})
+    clean, errors = validate({"allowed_recipients": "a@b.de\n@c.de\n", "relay_timeout": "10"})
     assert not errors
-    assert clean["allowed_senders"] == ["a@b.de", "@c.de"]
-    assert clean["relay_port"] == 587
-    _, errors = validate({"allowed_networks": "nonsense", "allowed_senders": "no-at-sign"})
+    assert clean["allowed_recipients"] == ["a@b.de", "@c.de"]
+    assert clean["relay_timeout"] == 10
+    _, errors = validate({"allowed_networks": "nonsense", "allowed_recipients": "no-at-sign"})
     assert len(errors) == 2
-    _, errors = validate({"rewrite_enabled": True, "rewrite_from_address": ""})
+    _, errors = validate({"proxy_auth_enabled": True, "proxy_auth_trusted_networks": ""})
     assert errors

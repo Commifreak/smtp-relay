@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ r.name or 'New relay' }}{% endblock %}
+{% block content %}
+<h1>{{ 'Relay “' ~ r.name ~ '”' if relay_id else 'New relay' }}</h1>
+{% for e in errors %}<div class="alert err">{{ e }}</div>{% endfor %}
+<form method="post" action="{{ '/relays/%d' % relay_id if relay_id else '/relays/new' }}" class="settings">
+<fieldset>
+  <legend>General</legend>
+  <div class="row">
+    <label>Name<input name="name" value="{{ r.name }}" placeholder="mailbox.org" required></label>
+  </div>
+  <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if r.enabled }}> Enabled</label>
+  <label>Senders <small>one per line · <code>service@example.com</code>, <code>@example.com</code> (whole domain) or <code>*</code> (anyone else). Only matching senders may send through this relay.</small>
+    <textarea name="senders" rows="5" placeholder="nas@example.com&#10;@home.example.com">{{ r.senders|join('\n') }}</textarea></label>
+</fieldset>
+<fieldset>
+  <legend>Server</legend>
+  <div class="row">
+    <label>Host<input name="host" value="{{ r.host }}" required></label>
+    <label>Port<input type="number" name="port" value="{{ r.port }}" required></label>
+    <label>Encryption
+      <select name="security">
+        <option value="ssl" {{ 'selected' if r.security == 'ssl' }}>SSL/TLS (implicit, usually port 465)</option>
+        <option value="starttls" {{ 'selected' if r.security == 'starttls' }}>STARTTLS (usually port 587)</option>
+        <option value="none" {{ 'selected' if r.security == 'none' }}>None (unencrypted)</option>
+      </select></label>
+  </div>
+  <div class="row">
+    <label>Username<input name="username" value="{{ r.username }}" autocomplete="off"></label>
+    <label>Password <small>{{ 'stored – leave empty to keep it' if relay_id and r.password else 'not set' }}</small>
+      <input type="password" name="password" value="" autocomplete="new-password"></label>
+  </div>
+  <label class="check"><input type="checkbox" name="tls_verify" {{ 'checked' if r.tls_verify }}> Verify the relay's TLS certificate</label>
+</fieldset>
+<fieldset>
+  <legend>Sender rewriting</legend>
+  <p class="hint">Providers like mailbox.org only accept sender addresses that belong to your account. Rewriting replaces the sender of mail sent through this relay with one of your addresses.</p>
+  <label class="check"><input type="checkbox" name="rewrite_enabled" {{ 'checked' if r.rewrite_enabled }}> Rewrite the From header</label>
+  <div class="row">
+    <label>New sender address<input name="rewrite_from_address" value="{{ r.rewrite_from_address }}" placeholder="relay@yourdomain.com"></label>
+    <label>Display name
+      <select name="rewrite_name_mode">
+        <option value="keep" {{ 'selected' if r.rewrite_name_mode == 'keep' }}>Keep original display name</option>
+        <option value="address" {{ 'selected' if r.rewrite_name_mode == 'address' }}>Original address as display name</option>
+        <option value="fixed" {{ 'selected' if r.rewrite_name_mode == 'fixed' }}>Fixed name</option>
+        <option value="none" {{ 'selected' if r.rewrite_name_mode == 'none' }}>No display name</option>
+      </select></label>
+    <label>Fixed name<input name="rewrite_fixed_name" value="{{ r.rewrite_fixed_name }}" placeholder="Home network"></label>
+  </div>
+  <label class="check"><input type="checkbox" name="rewrite_envelope" {{ 'checked' if r.rewrite_envelope }}> Also rewrite the envelope sender (MAIL FROM)</label>
+  <label class="check"><input type="checkbox" name="rewrite_set_reply_to" {{ 'checked' if r.rewrite_set_reply_to }}> Set the original address as Reply-To (if not present)</label>
+  <p class="hint">The original From header is always kept as <code>X-Original-From</code>.</p>
+</fieldset>
+<div class="actions">
+  <button class="primary">Save</button>
+  <a class="btn" href="/relays">Cancel</a>
+</div>
+</form>
+{% if relay_id %}
+<fieldset class="danger">
+  <legend>Delete</legend>
+  <p class="hint">Queued messages from senders of this relay are routed again on their next attempt; if no other relay matches, they fail.</p>
+  <form method="post" action="/relays/{{ relay_id }}/delete" onsubmit="return confirm('Delete relay “{{ r.name }}”?')"><button class="danger">Delete relay</button></form>
+</fieldset>
+{% endif %}
+{% endblock %}

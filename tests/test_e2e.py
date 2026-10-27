@@ -51,11 +51,15 @@ class Env:
             c.ehlo("nas.home.lan")
             return c.sendmail(mail_from, list(rcpts), msg or MSG)
 
+    @property
+    def relay_id(self):
+        return self.queue.relays.first()["id"]
+
     def relay_down(self):
-        self.settings.update({"relay_port": 1})
+        assert self.queue.relays.save({"port": 1}, self.relay_id)[1] == []
 
     def relay_up(self):
-        self.settings.update({"relay_port": self.up_port})
+        assert self.queue.relays.save({"port": self.up_port}, self.relay_id)[1] == []
 
     def make_due(self):
         self.db.execute("UPDATE messages SET next_attempt_at = 0 WHERE status = 'queued'")
@@ -74,12 +78,12 @@ def env(tmp_path):
     ctrl.start()
     db = Database(str(tmp_path / "t.db"))
     settings = Settings(db)
-    assert not settings.update({"relay_host": "127.0.0.1", "relay_port": up_port, "relay_security": "none",
-                                "relay_timeout": 5,
-                                "allowed_senders": ["nas@intern.lan", "@home.lan"],
-                                "allowed_networks": ["127.0.0.0/8"],
-                                "rewrite_enabled": True, "rewrite_from_address": "relay@example.de"})
+    assert not settings.update({"relay_timeout": 5, "allowed_networks": ["127.0.0.0/8"]})
     queue = DeliveryQueue(db, settings)
+    _, errors = queue.relays.save({"name": "upstream", "host": "127.0.0.1", "port": up_port, "security": "none",
+                                   "senders": ["nas@intern.lan", "@home.lan"], "rewrite_enabled": True,
+                                   "rewrite_from_address": "relay@example.de"})
+    assert not errors
     loop = asyncio.new_event_loop()
     threading.Thread(target=loop.run_forever, daemon=True).start()
     server = asyncio.run_coroutine_threadsafe(
@@ -267,7 +271,7 @@ def test_web_ui(env):
     env.send()
     client = web_client(env)
     for url in ["/", "/?q=Backup", "/?status=queued", "/messages/1", "/messages/2", "/queue", "/sessions",
-                "/sessions/1", "/sessions?kind=outbound", "/settings", "/tools", "/messages/1/eml", "/healthz"]:
+                "/sessions/1", "/sessions?kind=outbound", "/settings", "/tools", "/relays", "/relays/new", "/relays/1", "/messages/1/eml", "/healthz"]:
         r = client.get(url)
         assert r.status_code == 200, url
     assert "Backup ok" in client.get("/").text
@@ -278,18 +282,16 @@ def test_web_ui(env):
 
     r = client.post("/queue/pause", data={"paused": "1"}, follow_redirects=False)
     assert r.status_code == 303 and env.settings.get("queue_paused") is True
-    r = client.post("/settings", data={"allowed_senders": "a@b.de", "allowed_networks": "127.0.0.0/8",
-                                       "relay_host": "127.0.0.1", "relay_port": str(env.up_port),
-                                       "relay_security": "none", "smtp_hostname": "x", "max_message_size_mb": "10",
-                                       "relay_timeout": "5", "retention_days": "7", "rewrite_name_mode": "keep",
-                                       "retry_intervals": "2,4", "queue_max_age_hours": "24",
-                                       "notify_address": ""},
+    r = client.post("/settings", data={"allowed_networks": "127.0.0.0/8", "smtp_hostname": "x",
+                                       "max_message_size_mb": "10", "relay_timeout": "5", "retention_days": "7",
+                                       "retry_intervals": "2,4", "queue_max_age_hours": "24", "notify_address": ""},
                     follow_redirects=False)
     assert r.status_code == 303
-    assert env.settings.get("allowed_senders") == ["a@b.de"]
+    assert env.settings.get("relay_timeout") == 5
     assert env.settings.get("retry_intervals") == "2, 4"
     assert env.settings.get("queue_paused") is True  # not touched by the settings form
 
+    env.relay_up()
     r = client.post("/queue/2/deliver", follow_redirects=False)
     assert r.status_code == 303 and env.message(2)["status"] == "relayed"
     r = client.post("/messages/1/resend", follow_redirects=False)
@@ -306,3 +308,61 @@ def test_web_remove_from_queue(env):
     m = env.message()
     assert m["status"] == "failed" and "Manually" in m["failed_rcpts"]
     assert client.post("/queue/deliver-all", follow_redirects=False).status_code == 303
+
+
+def test_routing_to_second_relay(env, tmp_path):
+    """Senders are routed to the relay with the most specific matching pattern, each with its own rewriting."""
+    second = Upstream()
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    ctrl = Controller(second, hostname="127.0.0.1", port=port)
+    ctrl.start()
+    try:
+        _, errors = env.queue.relays.save({"name": "other", "host": "127.0.0.1", "port": port, "security": "none",
+                                           "senders": ["printer@home.lan"]})
+        assert not errors
+        env.send(mail_from="printer@home.lan")   # exact pattern on "other" beats @home.lan on "upstream"
+        env.send(mail_from="camera@home.lan")
+        assert [m.mail_from for m in second.messages] == ["printer@home.lan"]  # no rewriting on "other"
+        assert [m.mail_from for m in env.upstream.messages] == ["relay@example.de"]
+        names = [r["relay_name"] for r in env.db.query("SELECT relay_name FROM messages ORDER BY id")]
+        assert names == ["other", "upstream"]
+    finally:
+        ctrl.stop()
+
+
+def test_queued_message_follows_relay_changes(env):
+    """Routing happens on every attempt: a queued message uses the relay configured at retry time."""
+    env.relay_down()
+    env.send(mail_from="camera@home.lan")
+    assert env.message()["status"] == "queued"
+    env.queue.relays.delete(env.relay_id)
+    env.make_due()
+    env.run(env.queue.process_due())
+    m = env.message()
+    assert m["status"] == "failed" and "No enabled relay matches the sender" in m["failed_rcpts"]
+
+
+def test_test_message_with_fixed_relay(env):
+    client = web_client(env)
+    r = client.post("/tools/send-test", data={"relay_id": str(env.relay_id), "from": "someone@else.org",
+                                              "to": "me@example.de"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert env.message()["status"] == "relayed" and env.message()["relay_id"] == env.relay_id
+
+
+def test_web_relay_management(env):
+    client = web_client(env)
+    r = client.post("/relays/new", data={"name": "second", "host": "smtp.example.net", "port": "587",
+                                         "security": "starttls", "senders": "@other.lan", "enabled": "on",
+                                         "tls_verify": "on"}, follow_redirects=False)
+    assert r.status_code == 303
+    relay = env.queue.relays.route("x@other.lan")[0]
+    assert relay["name"] == "second"
+    r = client.post(f"/relays/{relay['id']}", data={"name": "second", "host": "smtp.example.net", "port": "587",
+                                                    "security": "starttls", "senders": "@home.lan", "enabled": "on"})
+    assert "already used by relay" in r.text
+    assert "second" in client.get("/relays").text
+    client.post(f"/relays/{relay['id']}/delete")
+    assert env.queue.relays.route("x@other.lan") == (None, None)

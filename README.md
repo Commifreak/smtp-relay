@@ -2,19 +2,23 @@
 
 A small SMTP relay (smarthost client) in a Docker container. It accepts mail from devices and services on
 your local network (NAS, printers, Home Assistant, Proxmox, cron jobs …) and forwards it with
-authentication through **mailbox.org** or any other SMTP provider. The web UI is built for **maximum
-diagnostics**: every message and every line of both SMTP conversations is recorded.
+authentication through **mailbox.org** or any other SMTP provider – or through **several providers**, chosen
+by sender address or domain. The web UI is built for **maximum diagnostics**: every message and every line of
+both SMTP conversations is recorded.
 
 ![Mail history](docs/screenshots/history.png)
 
 ## Features
 
 - **SMTP for the LAN** on container port 2525, mapped to e.g. port 25 on the host
+- **Multiple relay servers**, each with its own credentials and sender rewriting
+  - Every relay lists the senders it handles: `service@domain.com`, `@domain.com` for a whole domain, or `*`
+    for everyone else. The most specific match wins (exact address, then domain, then `*`).
+  - Relaying via SSL/TLS (465) or STARTTLS (587) with authentication
 - **Access control**
   - allowed client networks (CIDR); other IPs are refused as soon as they connect
-  - **allowed senders**: `service@domain.com`, `@domain.com` for a whole domain, or `*` for anyone
+  - only senders that match a relay are accepted; everything else is rejected
   - optional allowed recipients
-- **Relaying** via SSL/TLS (465) or STARTTLS (587) with authentication
 - **Delivery queue with automatic retries** (store-and-forward)
   - Every message is stored in the database first and delivered right away.
   - Permanent rejections from the relay (5xx) are returned to the client directly.
@@ -24,12 +28,12 @@ diagnostics**: every message and every line of both SMTP conversations is record
   - Delivery is given up after the maximum queue lifetime (default 48 h).
   - Optionally, a notification goes to an admin address when delivery finally fails.
   - The queue survives container restarts; interrupted deliveries are resumed.
-- **Sender rewriting**: the From header (and optionally the envelope sender) is replaced with an address
-  your provider accepts.
+- **Sender rewriting** per relay: the From header (and optionally the envelope sender) is replaced with an
+  address that provider accepts.
   - The display name can be kept, or replaced by the original address or a fixed name.
   - Reply-To can be set to the original sender.
   - The original From header is preserved as `X-Original-From`.
-- **Setup wizard** on first start: account, relay server (with connection test), allowed senders, options.
+- **Setup wizard** on first start: account, first relay server (with connection test), its senders, options.
   No configuration files or environment variables needed.
 - **Login** with username and password; the initial password is generated and printed to the container log.
 - **Single sign-on** via reverse proxy headers, e.g. **Authelia** (`Remote-User`), restricted to trusted
@@ -102,8 +106,8 @@ Prebuilt images for amd64 and arm64 are published to the GitHub Container Regist
    ```
 
 4. Open `http://<docker-host>:8080`, log in and follow the setup wizard. It asks for your own credentials,
-   the relay server (with a connection test), the allowed senders and networks, and optional sender
-   rewriting and failure notifications.
+   the first relay server (with a connection test), the senders it handles and the allowed networks, and
+   optional sender rewriting and failure notifications. More relays can be added afterwards under **Relays**.
 
 | Login | Setup wizard |
 |-------|--------------|
@@ -132,8 +136,8 @@ docker compose pull && docker compose up -d
 | Tag         | Contents                                                                 |
 |-------------|--------------------------------------------------------------------------|
 | `1`         | Latest 1.x release – **default in `docker-compose.yml`**, never jumps to 2.x |
-| `1.2`       | Latest 1.2.x release (bug fixes only)                                    |
-| `1.2.0`     | Exactly this release                                                     |
+| `1.3`       | Latest 1.3.x release (bug fixes only)                                    |
+| `1.3.0`     | Exactly this release                                                     |
 | `latest`    | Latest build of the `main` branch (may contain unreleased changes)       |
 | `sha-…`     | A specific commit                                                        |
 
@@ -163,6 +167,32 @@ the other was temporarily refused and is queued for a retry:
 **Settings**:
 
 ![Settings](docs/screenshots/settings.png)
+
+### Upgrading from 1.2
+
+The relay server, allowed senders and sender rewriting of earlier versions are converted into the first relay
+automatically on start; nothing needs to be done.
+
+## Multiple relays
+
+Under **Relays** you can add as many relay servers as you like. Each relay has
+
+- a list of **senders** it is responsible for: exact addresses (`nas@home.example.com`), whole domains
+  (`@office.example.com`) or `*` as a catch-all,
+- its own **server and credentials**,
+- its own **sender rewriting** – providers usually only accept their own sender addresses.
+
+For every message the relay with the **most specific matching pattern** is used: an exact address beats a
+domain, a domain beats `*`. The same pattern cannot be assigned to two enabled relays. Senders that match no
+enabled relay are rejected with `550`, so the sender lists are also the allowlist.
+
+Routing is evaluated on every delivery attempt: if you fix or change a relay while messages are queued, the
+next retry uses the new configuration. There is no automatic failover between relays; a failing relay is
+handled by the queue and its retries. Test messages under **Diagnostics** can be sent through a specific relay.
+
+![Relays](docs/screenshots/relays.png)
+
+![Relay settings](docs/screenshots/relay-edit.png)
 
 ## mailbox.org
 
@@ -249,6 +279,7 @@ Layout:
 - `app/smtp_server.py`: SMTP listener (aiosmtpd), policy checks and recording of the inbound conversation
 - `app/delivery.py`: queue, delivery attempts, retries and failure notifications
 - `app/relay.py`: SMTP connection to the relay (smtplib) with recording of the outbound conversation
+- `app/relays.py`: relay servers and sender-based routing
 - `app/rewrite.py`: header rewriting on the raw message, so the body stays untouched
 - `app/auth.py`: admin account, login sessions and reverse proxy authentication
 - `app/web.py` and `app/templates/`: web UI incl. setup wizard (FastAPI and Jinja2, no external browser
@@ -259,7 +290,7 @@ The GitHub Action runs the tests on every push and pull request. Pushes to `main
 image; pushing a version tag publishes the release tags:
 
 ```bash
-git tag v1.2.0 && git push origin v1.2.0   # -> images 1.2.0, 1.2 and 1
+git tag v1.3.0 && git push origin v1.3.0   # -> images 1.3.0, 1.3 and 1
 ```
 
 Keep `__version__` in `app/__init__.py` in sync with the tag.

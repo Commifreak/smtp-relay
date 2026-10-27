@@ -27,6 +27,7 @@
   {% if (msg.pending_rcpts|fromjson) %}<tr><th>Pending</th><td>{{ (msg.pending_rcpts|fromjson)|join(', ') }}</td></tr>{% endif %}
   {% if (msg.delivered_rcpts|fromjson) %}<tr><th>Delivered to</th><td>{{ (msg.delivered_rcpts|fromjson)|join(', ') }}</td></tr>{% endif %}
   {% if (msg.failed_rcpts|fromjson) %}<tr><th>Failed</th><td class="err">{% for f in msg.failed_rcpts|fromjson %}{{ f }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>{% endif %}
+  {% if msg.relay_name %}<tr><th>Relay</th><td>{{ msg.relay_name }}</td></tr>{% endif %}
   {% if msg.relay_from %}<tr><th>Sender sent to relay</th><td>{{ msg.relay_from }}</td></tr>{% endif %}
   {% if msg.relayed_at %}<tr><th>Relayed</th><td>{{ msg.relayed_at|ts }}</td></tr>{% endif %}
   <tr><th>Result</th><td class="{{ 'err' if msg.status in ('failed', 'deferred', 'rejected') }}">{{ msg.detail or '' }}</td></tr>

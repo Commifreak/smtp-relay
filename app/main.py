@@ -11,6 +11,7 @@ from .auth import ensure_credentials
 from .config import Settings
 from .db import Database
 from .delivery import DeliveryQueue
+from .relays import Relays
 from .smtp_server import protocol_factory
 from .web import create_app
 
@@ -49,6 +50,8 @@ async def main() -> None:
         if os.path.exists(old) and not os.path.exists(db_path + suffix):
             os.rename(old, db_path + suffix)
     db = Database(db_path)
+    if Relays(db).migrate_single_relay():
+        log.info("Moved the relay settings of the previous version into the first relay")
     settings = Settings(db)
     reset = os.environ.get("RESET_ADMIN_PASSWORD", "").lower() in ("1", "true", "yes")
     ensure_credentials(settings, reset=reset)
@@ -66,8 +69,8 @@ async def main() -> None:
     log.info("SMTP listening on port %s, web UI on port %s", smtp_port, web_port)
     if not settings.get("setup_completed"):
         log.warning("Setup not completed yet – open the web UI to run the setup wizard")
-    elif not settings.get("allowed_senders"):
-        log.warning("No allowed senders configured – all mail will be rejected")
+    elif not Relays(db).all():
+        log.warning("No relay configured – all mail will be rejected")
 
     web = uvicorn.Server(uvicorn.Config(create_app(db, settings, queue), host="0.0.0.0", port=web_port,
                                         log_level="warning", proxy_headers=False))

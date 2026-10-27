@@ -14,6 +14,7 @@
     <a href="/" class="{{ 'active' if request.url.path == '/' or request.url.path.startswith('/messages') }}">Mail history</a>
     {% set qn = queue_count() %}
     <a href="/queue" class="{{ 'active' if request.url.path.startswith('/queue') }}">Queue{% if qn %} <span class="count">{{ qn }}</span>{% endif %}</a>
+    <a href="/relays" class="{{ 'active' if request.url.path.startswith('/relays') }}">Relays</a>
     <a href="/sessions" class="{{ 'active' if request.url.path.startswith('/sessions') }}">SMTP sessions</a>
     <a href="/tools" class="{{ 'active' if request.url.path.startswith('/tools') }}">Diagnostics</a>
     <a href="/settings" class="{{ 'active' if request.url.path.startswith('/settings') }}">Settings</a>
