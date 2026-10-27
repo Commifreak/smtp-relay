@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Warteschlange{% endblock %}
+{% block content %}
+<h1>Warteschlange</h1>
+{% if paused %}<div class="alert warn">Die Warteschlange ist angehalten – es finden keine automatischen Zustellversuche statt. Neue Mails werden weiterhin sofort zugestellt bzw. eingereiht.</div>{% endif %}
+<div class="actions">
+  <form method="post" action="/queue/pause">
+    <input type="hidden" name="paused" value="{{ '0' if paused else '1' }}">
+    <button>{{ 'Warteschlange fortsetzen' if paused else 'Warteschlange anhalten' }}</button>
+  </form>
+  {% if rows %}<form method="post" action="/queue/deliver-all"><button class="primary">Alle jetzt zustellen</button></form>{% endif %}
+</div>
+<p class="muted">Wiederholung nach {{ s.retry_intervals }} Minuten (danach im letzten Abstand), Aufgabe nach {{ s.queue_max_age_hours }} h.{% if s.notify_address %} Benachrichtigung an {{ s.notify_address }}.{% else %} Keine Benachrichtigung konfiguriert.{% endif %}</p>
+<table class="list">
+<thead><tr><th>#</th><th>Empfangen</th><th>Absender</th><th>Ausstehend</th><th>Betreff</th><th>Versuche</th><th>Nächster Versuch</th><th>Letzter Fehler</th><th></th></tr></thead>
+<tbody>
+{% for m in rows %}
+<tr>
+  <td><a href="/messages/{{ m.id }}">{{ m.id }}</a></td>
+  <td class="nowrap">{{ m.received_at|ts }}{% if m.is_notification %}<div class="sub">Benachrichtigung</div>{% endif %}</td>
+  <td>{{ m.mail_from }}<div class="sub">{{ m.client_ip }}{% if m.client_name %} · {{ m.client_name }}{% endif %}</div></td>
+  <td>{{ (m.pending_rcpts|fromjson)|join(', ') }}</td>
+  <td>{{ m.subject or '' }}</td>
+  <td>{{ m.attempts }}</td>
+  <td class="nowrap">{% if m.status == 'relaying' %}<span class="badge">läuft gerade</span>{% elif m.next_attempt_at %}{{ m.next_attempt_at|ts }}{% if m.next_attempt_at <= now %} <span class="muted">(fällig)</span>{% endif %}{% endif %}</td>
+  <td class="sub err">{{ (m.detail or '')|truncate(120) }}</td>
+  <td class="nowrap">{% if m.status == 'queued' %}
+    <form method="post" action="/queue/{{ m.id }}/deliver" class="inline"><button>Jetzt</button></form>
+    <form method="post" action="/queue/{{ m.id }}/remove" class="inline" onsubmit="return confirm('Nachricht #{{ m.id }} aus der Warteschlange entfernen?')"><button class="danger">Entfernen</button></form>
+  {% endif %}</td>
+</tr>
+{% else %}
+<tr><td colspan="9" class="muted center">Die Warteschlange ist leer.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endblock %}

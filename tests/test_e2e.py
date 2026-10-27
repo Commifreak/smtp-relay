@@ -1,9 +1,10 @@
-"""End-to-end: client -> MTA-Relay -> fake upstream relay."""
+"""End-to-end: client -> MTA-Relay (incl. delivery queue) -> fake upstream relay."""
 import asyncio
 import json
 import smtplib
 import socket
 import threading
+import time
 
 import pytest
 from aiosmtpd.controller import Controller
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.db import Database
+from app.delivery import DeliveryQueue
 from app.smtp_server import protocol_factory
 from app.web import create_app
 
@@ -19,16 +21,46 @@ class Upstream:
     def __init__(self):
         self.messages = []
         self.reject_rcpt = set()
+        self.temp_rcpt = set()
 
     async def handle_RCPT(self, server, session, envelope, address, rcpt_options):
         if address in self.reject_rcpt:
             return "550 5.1.1 No such user"
+        if address in self.temp_rcpt:
+            return "450 4.2.0 Mailbox busy, try later"
         envelope.rcpt_tos.append(address)
         return "250 OK"
 
     async def handle_DATA(self, server, session, envelope):
         self.messages.append(envelope)
         return "250 2.0.0 Ok: queued as ABC123"
+
+
+class Env:
+    def __init__(self, db, settings, queue, upstream, port, up_port, loop):
+        self.db, self.settings, self.queue, self.upstream = db, settings, queue, upstream
+        self.port, self.up_port, self.loop = port, up_port, loop
+
+    def run(self, coro):
+        """Run a coroutine on the server's event loop."""
+        return asyncio.run_coroutine_threadsafe(coro, self.loop).result(30)
+
+    def send(self, mail_from="nas@intern.lan", rcpts=("me@example.de",), msg=None):
+        with smtplib.SMTP("127.0.0.1", self.port) as c:
+            c.ehlo("nas.home.lan")
+            return c.sendmail(mail_from, list(rcpts), msg or MSG)
+
+    def relay_down(self):
+        self.settings.update({"relay_port": 1})
+
+    def relay_up(self):
+        self.settings.update({"relay_port": self.up_port})
+
+    def make_due(self):
+        self.db.execute("UPDATE messages SET next_attempt_at = 0 WHERE status = 'queued'")
+
+    def message(self, message_id=1):
+        return self.db.query_one("SELECT * FROM messages WHERE id = ?", (message_id,))
 
 
 @pytest.fixture
@@ -42,16 +74,17 @@ def env(tmp_path):
     db = Database(str(tmp_path / "t.db"))
     settings = Settings(db)
     assert not settings.update({"relay_host": "127.0.0.1", "relay_port": up_port, "relay_security": "none",
+                                "relay_timeout": 5,
                                 "allowed_senders": ["nas@intern.lan", "@home.lan"],
                                 "allowed_networks": ["127.0.0.0/8"],
                                 "rewrite_enabled": True, "rewrite_from_address": "relay@example.de"})
+    queue = DeliveryQueue(db, settings)
     loop = asyncio.new_event_loop()
-    t = threading.Thread(target=loop.run_forever, daemon=True)
-    t.start()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
     server = asyncio.run_coroutine_threadsafe(
-        loop.create_server(protocol_factory(db, settings), "127.0.0.1", 0), loop).result()
+        loop.create_server(protocol_factory(db, settings, queue), "127.0.0.1", 0), loop).result()
     port = server.sockets[0].getsockname()[1]
-    yield db, settings, upstream, port
+    yield Env(db, settings, queue, upstream, port, up_port, loop)
     loop.call_soon_threadsafe(server.close)
     loop.call_soon_threadsafe(loop.stop)
     ctrl.stop()
@@ -61,91 +94,203 @@ MSG = "From: NAS <nas@intern.lan>\r\nTo: me@example.de\r\nSubject: Backup ok\r\n
 
 
 def test_relay_success(env):
-    db, settings, upstream, port = env
-    with smtplib.SMTP("127.0.0.1", port) as c:
-        c.ehlo("nas.home.lan")
-        c.sendmail("nas@intern.lan", ["me@example.de"], MSG)
-    assert len(upstream.messages) == 1
-    env_up = upstream.messages[0]
+    env.send()
+    assert len(env.upstream.messages) == 1
+    env_up = env.upstream.messages[0]
     assert env_up.mail_from == "relay@example.de"
     assert b"From: NAS <relay@example.de>" in env_up.content
     assert b"X-Original-From: NAS <nas@intern.lan>" in env_up.content
-    m = db.query_one("SELECT * FROM messages")
+    m = env.message()
     assert m["status"] == "relayed"
     assert m["subject"] == "Backup ok"
+    assert m["attempts"] == 1
+    assert json.loads(m["delivered_rcpts"]) == ["me@example.de"]
+    assert json.loads(m["pending_rcpts"]) == []
     assert "queued as ABC123" in m["detail"]
-    sessions = {s["kind"]: s for s in db.query("SELECT * FROM sessions")}
-    inbound = [l["line"] for l in db.transcript(sessions["inbound"]["id"])]
-    outbound = [l["line"] for l in db.transcript(sessions["outbound"]["id"])]
+    sessions = {s["kind"]: s for s in env.db.query("SELECT * FROM sessions")}
+    inbound = [l["line"] for l in env.db.transcript(sessions["inbound"]["id"])]
+    outbound = [l["line"] for l in env.db.transcript(sessions["outbound"]["id"])]
     assert any(l.lower().startswith("ehlo nas.home.lan") for l in inbound)
     assert any(l.lower().startswith("mail from:<nas@intern.lan>") for l in inbound)
     assert any("Nachrichteninhalt" in l for l in inbound)
-    assert any(l.startswith("250 2.0.0 Ok: relayed") for l in inbound)
+    assert any(l.startswith("250 2.0.0 Ok: relayed as #1") for l in inbound)
     assert any(l.lower().startswith("mail from:<relay@example.de>") for l in outbound)
     assert any("queued as ABC123" in l for l in outbound)
     assert sessions["inbound"]["helo"] == "nas.home.lan"
 
 
 def test_sender_rejected(env):
-    db, settings, upstream, port = env
-    with smtplib.SMTP("127.0.0.1", port) as c:
-        with pytest.raises(smtplib.SMTPSenderRefused):
-            c.sendmail("evil@example.com", ["me@example.de"], MSG)
-    assert not upstream.messages
-    m = db.query_one("SELECT * FROM messages")
+    with pytest.raises(smtplib.SMTPSenderRefused):
+        env.send(mail_from="evil@example.com")
+    assert not env.upstream.messages
+    m = env.message()
     assert m["status"] == "rejected" and m["mail_from"] == "evil@example.com"
 
 
-def test_upstream_rejects_recipient(env):
-    db, settings, upstream, port = env
-    upstream.reject_rcpt.add("bad@example.de")
-    with smtplib.SMTP("127.0.0.1", port) as c:
-        with pytest.raises(smtplib.SMTPDataError) as exc:
-            c.sendmail("x@home.lan", ["bad@example.de"], MSG)
+def test_permanent_rejection_is_returned_and_notified(env):
+    env.settings.update({"notify_address": "admin@example.de"})
+    env.upstream.reject_rcpt.add("bad@example.de")
+    with pytest.raises(smtplib.SMTPDataError) as exc:
+        env.send(mail_from="x@home.lan", rcpts=["bad@example.de"])
     assert exc.value.smtp_code == 550
-    m = db.query_one("SELECT * FROM messages")
+    m = env.message()
     assert m["status"] == "failed"
+    assert "No such user" in m["failed_rcpts"]
+    note = env.db.query_one("SELECT * FROM messages WHERE is_notification = 1")
+    assert note["status"] == "queued"
+    assert json.loads(note["rcpt_to"]) == ["admin@example.de"]
+    assert note["subject"] == "Unzustellbar: Backup ok"
 
 
 def test_network_rejected(env):
-    db, settings, upstream, port = env
-    settings.update({"allowed_networks": ["10.0.0.0/8"]})
+    env.settings.update({"allowed_networks": ["10.0.0.0/8"]})
     with pytest.raises(smtplib.SMTPConnectError):
-        smtplib.SMTP("127.0.0.1", port)
-    s = db.query_one("SELECT * FROM sessions")
+        smtplib.SMTP("127.0.0.1", env.port)
+    s = env.db.query_one("SELECT * FROM sessions")
     assert s["result"] == "abgelehnt: Netz"
 
 
-def test_upstream_down_defers(env):
-    db, settings, upstream, port = env
-    settings.update({"relay_port": 1})
-    with smtplib.SMTP("127.0.0.1", port) as c:
-        with pytest.raises(smtplib.SMTPDataError) as exc:
-            c.sendmail("nas@intern.lan", ["me@example.de"], MSG)
-    assert exc.value.smtp_code == 451
-    assert db.query_one("SELECT status FROM messages")["status"] == "deferred"
+def test_relay_down_queues_and_retries(env):
+    env.relay_down()
+    before = time.time()
+    assert env.send() == {}  # accepted by MTA-Relay despite relay outage
+    m = env.message()
+    assert m["status"] == "queued"
+    assert m["attempts"] == 1
+    assert before + 55 < m["next_attempt_at"] < time.time() + 65  # first interval: 1 minute
+    assert env.run(env.queue.process_due()) == 0  # not due yet
+
+    env.relay_up()
+    env.make_due()
+    assert env.run(env.queue.process_due()) == 1
+    m = env.message()
+    assert m["status"] == "relayed" and m["attempts"] == 2 and m["next_attempt_at"] is None
+    assert len(env.upstream.messages) == 1
+    assert len(env.db.query("SELECT * FROM sessions WHERE message_id = 1")) == 2
+    inbound = [l["line"] for l in env.db.transcript(m["session_id"])]
+    assert any(l.startswith("250 2.0.0 Ok: queued as #1") for l in inbound)
+
+
+def test_retry_intervals_grow(env):
+    env.relay_down()
+    env.settings.update({"retry_intervals": "1, 10"})
+    env.send()
+    for expected in (10, 10):
+        env.make_due()
+        now = time.time()
+        env.run(env.queue.process_due())
+        m = env.message()
+        assert m["status"] == "queued"
+        assert abs(m["next_attempt_at"] - now - expected * 60) < 5
+    assert env.message()["attempts"] == 3
+
+
+def test_temporary_recipient_failure_retries_only_that_recipient(env):
+    env.upstream.temp_rcpt.add("later@example.de")
+    env.send(rcpts=["ok@example.de", "later@example.de"])
+    m = env.message()
+    assert m["status"] == "queued"
+    assert json.loads(m["pending_rcpts"]) == ["later@example.de"]
+    assert json.loads(m["delivered_rcpts"]) == ["ok@example.de"]
+    assert env.upstream.messages[0].rcpt_tos == ["ok@example.de"]
+
+    env.upstream.temp_rcpt.clear()
+    env.make_due()
+    env.run(env.queue.process_due())
+    m = env.message()
+    assert m["status"] == "relayed"
+    assert env.upstream.messages[1].rcpt_tos == ["later@example.de"]
+    assert json.loads(m["delivered_rcpts"]) == ["ok@example.de", "later@example.de"]
+
+
+def test_queue_lifetime_exceeded(env):
+    env.settings.update({"notify_address": "admin@example.de"})
+    env.relay_down()
+    env.send()
+    env.db.execute("UPDATE messages SET queued_at = ? WHERE id = 1", (time.time() - 49 * 3600,))
+    env.make_due()
+    env.run(env.queue.process_due())
+    m = env.message()
+    assert m["status"] == "failed"
+    assert "Verweildauer" in m["failed_rcpts"]
+    notes = env.db.query("SELECT * FROM messages WHERE is_notification = 1")
+    assert len(notes) == 1  # no notification about the (also failing) notification
+    assert notes[0]["status"] == "queued"
+
+
+def test_recover_interrupted_delivery(env):
+    message_id = env.queue.accept(raw=MSG.encode(), mail_from="nas@intern.lan", rcpts=["me@example.de"])
+    assert env.message(message_id)["status"] == "relaying"
+    env.queue.recover()
+    assert env.message(message_id)["status"] == "queued"
+    env.run(env.queue.process_due())
+    assert env.message(message_id)["status"] == "relayed"
+
+
+def test_paused_queue(env):
+    env.relay_down()
+    env.send()
+    env.relay_up()
+    env.settings.update({"queue_paused": True})
+    env.make_due()
+    assert env.run(env.queue.process_due()) == 0
+    assert env.run(env.queue.deliver_now(1)).status == "relayed"  # manual delivery ignores the pause
+
+
+def test_content_dropped_after_delivery_when_not_stored(env):
+    env.settings.update({"store_content": False})
+    env.relay_down()
+    env.send()
+    assert env.message()["raw"] is not None  # kept while queued
+    env.relay_up()
+    env.make_due()
+    env.run(env.queue.process_due())
+    m = env.message()
+    assert m["status"] == "relayed" and m["raw"] is None
 
 
 def test_web_ui(env):
-    db, settings, upstream, port = env
-    with smtplib.SMTP("127.0.0.1", port) as c:
-        c.sendmail("nas@intern.lan", ["me@example.de"], MSG)
-    client = TestClient(create_app(db, settings))
-    for url in ["/", "/?q=Backup", "/?status=relayed", "/messages/1", "/sessions", "/sessions/1",
-                "/sessions?kind=outbound", "/settings", "/tools", "/messages/1/eml", "/healthz"]:
+    env.send()
+    env.relay_down()
+    env.send()
+    client = TestClient(create_app(env.db, env.settings, env.queue))
+    for url in ["/", "/?q=Backup", "/?status=queued", "/messages/1", "/messages/2", "/queue", "/sessions",
+                "/sessions/1", "/sessions?kind=outbound", "/settings", "/tools", "/messages/1/eml", "/healthz"]:
         r = client.get(url)
         assert r.status_code == 200, url
     assert "Backup ok" in client.get("/").text
     page = client.get("/messages/1").text
     assert "from:&lt;nas@intern.lan&gt;" in page and "queued as ABC123" in page
+    assert "Jetzt zustellen" in client.get("/messages/2").text
+    assert 'class="count">1<' in client.get("/queue").text
+
+    r = client.post("/queue/pause", data={"paused": "1"}, follow_redirects=False)
+    assert r.status_code == 303 and env.settings.get("queue_paused") is True
     r = client.post("/settings", data={"allowed_senders": "a@b.de", "allowed_networks": "127.0.0.0/8",
-                                       "relay_host": "127.0.0.1", "relay_port": "25", "relay_security": "none",
-                                       "smtp_hostname": "x", "max_message_size_mb": "10", "relay_timeout": "5",
-                                       "retention_days": "7", "rewrite_name_mode": "keep"},
+                                       "relay_host": "127.0.0.1", "relay_port": str(env.up_port),
+                                       "relay_security": "none", "smtp_hostname": "x", "max_message_size_mb": "10",
+                                       "relay_timeout": "5", "retention_days": "7", "rewrite_name_mode": "keep",
+                                       "retry_intervals": "2,4", "queue_max_age_hours": "24",
+                                       "notify_address": ""},
                     follow_redirects=False)
     assert r.status_code == 303
-    assert settings.get("allowed_senders") == ["a@b.de"]
-    assert settings.get("rewrite_enabled") is False
+    assert env.settings.get("allowed_senders") == ["a@b.de"]
+    assert env.settings.get("retry_intervals") == "2, 4"
+    assert env.settings.get("queue_paused") is True  # not touched by the settings form
+
+    r = client.post("/queue/2/deliver", follow_redirects=False)
+    assert r.status_code == 303 and env.message(2)["status"] == "relayed"
     r = client.post("/messages/1/resend", follow_redirects=False)
     assert r.status_code == 303
-    assert len(db.query("SELECT * FROM sessions WHERE message_id = 1")) == 2
+    assert len(env.db.query("SELECT * FROM sessions WHERE message_id = 1")) == 2
+
+
+def test_web_remove_from_queue(env):
+    env.relay_down()
+    env.send()
+    client = TestClient(create_app(env.db, env.settings, env.queue))
+    r = client.post("/queue/1/remove", follow_redirects=False)
+    assert r.status_code == 303
+    m = env.message()
+    assert m["status"] == "failed" and "Manuell" in m["failed_rcpts"]
+    assert client.post("/queue/deliver-all", follow_redirects=False).status_code == 303

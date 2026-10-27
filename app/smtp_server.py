@@ -1,6 +1,5 @@
 """Inbound SMTP server for the local network with full protocol transcript."""
 import asyncio
-import json
 import logging
 import socket
 
@@ -8,8 +7,7 @@ from aiosmtpd.smtp import SMTP
 
 from .config import Settings, address_matches, ip_allowed, normalize_ip
 from .db import Database, Transcript
-from .relay import deliver
-from .rewrite import header_meta
+from .delivery import DeliveryQueue
 
 log = logging.getLogger("mta-relay.smtp")
 
@@ -124,11 +122,12 @@ class LoggingSMTP(SMTP):
 
 
 class RelayHandler:
-    """aiosmtpd handler enforcing sender/recipient policy and relaying synchronously."""
+    """aiosmtpd handler enforcing sender/recipient policy; accepted mail goes to the delivery queue."""
 
-    def __init__(self, db: Database, settings: Settings):
+    def __init__(self, db: Database, settings: Settings, queue: DeliveryQueue):
         self.db = db
         self.settings = settings
+        self.queue = queue
 
     async def handle_EHLO(self, server, session, envelope, hostname, responses):
         session.host_name = hostname
@@ -169,26 +168,21 @@ class RelayHandler:
         raw = envelope.original_content or envelope.content
         if isinstance(raw, str):
             raw = raw.encode("utf-8", "surrogateescape")
-        settings = self.settings.snapshot()
-        meta = header_meta(raw)
-        message_id = self.db.insert_message(
+        message_id = self.queue.accept(
+            raw=raw, mail_from=envelope.mail_from, rcpts=list(envelope.rcpt_tos),
             session_id=server.db_session_id, client_ip=server.client_ip, client_name=server.client_name,
-            helo=session.host_name, mail_from=envelope.mail_from, rcpt_to=json.dumps(envelope.rcpt_tos),
-            size=len(raw), status="received", raw=raw if settings["store_content"] else None, **meta)
-        server.transcript.info(f"Nachricht #{message_id} angenommen ({len(raw)} Bytes), leite an "
-                               f"{settings['relay_host']} weiter …")
-        trace = {"helo": session.host_name, "client_name": server.client_name, "client_ip": server.client_ip,
-                 "id": message_id, "rcpt": envelope.rcpt_tos[0]}
-        result = await deliver(self.db, settings, message_id, raw, envelope.mail_from, envelope.rcpt_tos,
-                               trace, smtputf8=envelope.smtp_utf8)
-        (server.transcript.info if result.status in ("relayed", "partial") else server.transcript.error)(
-            f"Nachricht #{message_id}: {result.status} – {result.detail}")
+            helo=session.host_name)
+        server.transcript.info(f"Nachricht #{message_id} gespeichert ({len(raw)} Bytes), erster Zustellversuch an "
+                               f"{self.settings.get('relay_host')} …")
+        result = await self.queue.attempt(message_id)
+        log_line = server.transcript.error if result.status == "failed" else server.transcript.info
+        log_line(f"Nachricht #{message_id}: {result.status} – {result.detail}")
         self.db.update_session(server.db_session_id, result=result.status)
-        return result.smtp_response()
+        return result.smtp_response(message_id)
 
 
-def protocol_factory(db: Database, settings: Settings, tls_context=None):
-    handler = RelayHandler(db, settings)
+def protocol_factory(db: Database, settings: Settings, queue: DeliveryQueue, tls_context=None):
+    handler = RelayHandler(db, settings, queue)
 
     def factory():
         size = settings.get("max_message_size_mb")

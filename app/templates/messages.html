@@ -27,7 +27,7 @@
   <td>{{ (m.rcpt_to|fromjson)|join(', ') }}</td>
   <td>{{ m.subject or '' }}</td>
   <td class="nowrap">{{ m.size|size }}</td>
-  <td>{{ badge(m.status) }}{% if m.status in ('failed', 'deferred', 'rejected', 'partial') and m.detail %}<div class="sub err">{{ m.detail|truncate(90) }}</div>{% endif %}</td>
+  <td>{{ badge(m.status) }}{% if m.status in ('failed', 'deferred', 'rejected', 'partial', 'queued') and m.detail %}<div class="sub err">{{ m.detail|truncate(90) }}</div>{% endif %}</td>
 </tr>
 {% else %}
 <tr><td colspan="8" class="muted center">Keine Nachrichten gefunden.</td></tr>

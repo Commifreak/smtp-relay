@@ -62,10 +62,20 @@
 </fieldset>
 
 <fieldset>
+  <legend>Warteschlange</legend>
+  <p class="hint">Jede Mail wird zuerst gespeichert und sofort zugestellt. Lehnt das Relay endgültig ab (5xx), bekommt der Client den Fehler direkt zurück. Bei temporären Fehlern (Relay nicht erreichbar, 4xx) wird die Mail angenommen und automatisch erneut zugestellt.</p>
+  <div class="row">
+    <label>Wiederholungsabstände (Minuten) <small>kommagetrennt; der letzte Wert wiederholt sich</small><input name="retry_intervals" value="{{ s.retry_intervals }}"></label>
+    <label>Maximale Verweildauer (Stunden) <small>danach wird die Zustellung aufgegeben</small><input type="number" min="1" name="queue_max_age_hours" value="{{ s.queue_max_age_hours }}"></label>
+    <label>Benachrichtigung an <small>bei endgültig gescheiterter Zustellung; leer = keine</small><input name="notify_address" value="{{ s.notify_address }}" placeholder="admin@example.de"></label>
+  </div>
+</fieldset>
+
+<fieldset>
   <legend>Header & Historie</legend>
   <label class="check"><input type="checkbox" name="add_received_header" {{ 'checked' if s.add_received_header }}> Received-Header hinzufügen (Nachverfolgbarkeit)</label>
   <label class="check"><input type="checkbox" name="add_missing_headers" {{ 'checked' if s.add_missing_headers }}> Fehlende Date-/Message-ID-Header ergänzen</label>
-  <label class="check"><input type="checkbox" name="store_content" {{ 'checked' if s.store_content }}> Mail-Inhalte speichern (für Anzeige und „Erneut senden“)</label>
+  <label class="check"><input type="checkbox" name="store_content" {{ 'checked' if s.store_content }}> Mail-Inhalte dauerhaft speichern (für Anzeige und „Erneut senden“; sonst nur bis zum Abschluss der Zustellung)</label>
   <div class="row"><label>Aufbewahrung (Tage, 0 = unbegrenzt)<input type="number" min="0" name="retention_days" value="{{ s.retention_days }}"></label></div>
 </fieldset>
 <button class="primary">Speichern</button>

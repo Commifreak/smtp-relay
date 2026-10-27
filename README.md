@@ -12,10 +12,15 @@ lokalen Netz an (NAS, Drucker, Home Assistant, Proxmox, Cronjobs …) und leitet
   - **erlaubte Absender** (`dienst@domain.de`, `@domain.de` für eine ganze Domain, `*` für alle)
   - optional erlaubte Empfänger
 - **Weiterleitung** an das Relay per SSL/TLS (465) oder STARTTLS (587) mit Anmeldung
-- **Synchrone Zustellung**: Der Client bekommt direkt die Antwort des Relays.
-  - Hat mailbox.org die Mail angenommen, antwortet MTA-Relay mit `250`.
-  - Bei einem temporären Fehler antwortet es mit `451`, der Client versucht es dann später erneut.
-  - Bei einer endgültigen Ablehnung antwortet es mit `5xx` und dem Original-Fehlertext.
+- **Warteschlange mit automatischen Wiederholungen** (Store-and-Forward):
+  - Jede Mail wird zuerst in der Datenbank gespeichert und sofort ein erstes Mal zugestellt.
+  - Lehnt das Relay endgültig ab (5xx), bekommt der Client den Fehler direkt zurück.
+  - Bei temporären Fehlern (Relay nicht erreichbar, Timeout, 4xx) wird die Mail trotzdem mit `250` angenommen
+    und später erneut zugestellt, standardmäßig nach 1, 5, 15, 30 und danach alle 60 Minuten.
+  - Lehnt das Relay nur einzelne Empfänger temporär ab, werden auch nur diese erneut versucht.
+  - Nach der maximalen Verweildauer (Standard 48 h) wird die Zustellung aufgegeben.
+  - Optional geht bei endgültig gescheiterter Zustellung eine Benachrichtigung an eine Admin-Adresse.
+  - Die Warteschlange überlebt Container-Neustarts, unterbrochene Zustellungen werden wieder aufgenommen.
 - **Absender umschreiben**: Der From-Header (und optional der Envelope-Absender) bekommt eine Adresse, die
   mailbox.org akzeptiert.
   - Der Anzeigename lässt sich übernehmen, durch die Originaladresse oder einen festen Namen ersetzen.
@@ -25,13 +30,16 @@ lokalen Netz an (NAS, Drucker, Home Assistant, Proxmox, Cronjobs …) und leitet
   - **Mail-Historie** mit Zeit, Client-IP, Reverse-DNS und HELO, Absender, Empfänger, Betreff, Größe und Status, dazu Suche und Filter
   - **Detailansicht** mit allen Headern, Text- und HTML-Vorschau (abgeschottet), Anhangsliste, Rohdaten und `.eml`-Download
   - **Kompletter SMTP-Dialog Client → MTA-Relay** mit Zeitstempeln in Millisekunden
-  - **Kompletter SMTP-Dialog MTA-Relay → mailbox.org**, inklusive TLS-Version, Cipher, Zertifikat und Rewrite-Hinweisen. Zugangsdaten werden maskiert.
+  - **Kompletter SMTP-Dialog MTA-Relay → mailbox.org** für jeden einzelnen Zustellversuch, inklusive TLS-Version, Cipher, Zertifikat und Rewrite-Hinweisen. Zugangsdaten werden maskiert.
   - **Alle SMTP-Sitzungen**, auch ohne Mail: abgewiesene IPs, Portscans, abgebrochene Verbindungen
-  - **Erneut senden** für gespeicherte Mails
+  - **Warteschlange** mit Anzahl der Versuche, nächstem Versuch und letztem Fehler; Aktionen „Jetzt zustellen“,
+    „Entfernen“, „Alle jetzt zustellen“ und „Warteschlange anhalten“
+  - **Erneut senden** für abgeschlossene Mails
   - **Diagnose**: Verbindungs- und Login-Test zum Relay mit Protokoll, außerdem Testmail versenden
   - **Einstellungen**: werden sofort und ohne Neustart wirksam
   - Auto-Refresh und Dark Mode
-- Historie in SQLite mit konfigurierbarer Aufbewahrungsdauer; Mail-Inhalte zu speichern lässt sich abschalten
+- Historie in SQLite mit konfigurierbarer Aufbewahrungsdauer. Mail-Inhalte dauerhaft zu speichern lässt sich
+  abschalten; sie werden dann nur bis zum Abschluss der Zustellung aufbewahrt.
 
 ## Schnellstart
 
@@ -101,7 +109,8 @@ nur die Gateway-IP des Docker-Netzes (z. B. `172.17.0.1`), hilft eine dieser Var
   das, dass der Dienst zum offenen Relay wird.
 - `WEBUI_PASSWORD` setzen. Das WebUI zeigt Mail-Inhalte und enthält das Relay-Passwort, das in der
   Datenbank im Volume gespeichert ist.
-- Wenn Inhalte nicht gespeichert werden sollen, „Mail-Inhalte speichern“ deaktivieren. Metadaten und
+- Wenn Inhalte nicht dauerhaft gespeichert werden sollen, „Mail-Inhalte dauerhaft speichern“ deaktivieren.
+  Solange eine Mail in der Warteschlange liegt, bleibt ihr Inhalt trotzdem gespeichert. Metadaten und
   SMTP-Protokolle bleiben erhalten, „Erneut senden“ ist dann aber nicht möglich.
 
 ## Entwicklung
@@ -115,7 +124,8 @@ DATA_DIR=./data WEBUI_PASSWORD=test python -m app.main
 Aufbau:
 
 - `app/smtp_server.py`: SMTP-Annahme (aiosmtpd), Policy und Mitschnitt des eingehenden Dialogs
-- `app/relay.py`: Zustellung per smtplib mit Mitschnitt des ausgehenden Dialogs
+- `app/delivery.py`: Warteschlange, Zustellversuche, Wiederholungen und Benachrichtigungen
+- `app/relay.py`: SMTP-Verbindung zum Relay per smtplib mit Mitschnitt des ausgehenden Dialogs
 - `app/rewrite.py`: Header-Rewrite direkt auf den Rohdaten, damit der Body unverändert bleibt
 - `app/web.py` und `app/templates/`: WebUI (FastAPI und Jinja2, ohne externe Abhängigkeiten im Browser)
 - `app/db.py`: SQLite (Einstellungen, Sitzungen, Protokollzeilen, Nachrichten)

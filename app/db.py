@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS messages (
     subject            TEXT,
     message_id_header  TEXT,
     size               INTEGER,
-    status             TEXT NOT NULL,   -- rejected | received | relaying | relayed | partial | deferred | failed
+    status             TEXT NOT NULL,   -- rejected | relaying | queued | relayed | partial | failed
     detail             TEXT,
     relay_from         TEXT,
     relayed_at         REAL,
@@ -53,6 +53,18 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS ix_messages_received ON messages(received_at);
 CREATE INDEX IF NOT EXISTS ix_messages_session ON messages(session_id);
 """
+
+# Columns added after the first release; applied to new and existing databases.
+MESSAGE_COLUMNS = {
+    "attempts": "INTEGER NOT NULL DEFAULT 0",
+    "queued_at": "REAL",               # start of the queue lifetime
+    "next_attempt_at": "REAL",
+    "last_attempt_at": "REAL",
+    "pending_rcpts": "TEXT",           # JSON list: recipients still to deliver
+    "delivered_rcpts": "TEXT",         # JSON list
+    "failed_rcpts": "TEXT",            # JSON list of "rcpt: reason"
+    "is_notification": "INTEGER NOT NULL DEFAULT 0",
+}
 
 MAX_LINE = 4000
 
@@ -65,6 +77,11 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.executescript(SCHEMA)
+        existing = {r["name"] for r in self.conn.execute("PRAGMA table_info(messages)")}
+        for name, decl in MESSAGE_COLUMNS.items():
+            if name not in existing:
+                self.conn.execute(f"ALTER TABLE messages ADD COLUMN {name} {decl}")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS ix_messages_queue ON messages(status, next_attempt_at)")
 
     def execute(self, sql: str, params=()) -> sqlite3.Cursor:
         with self.lock:
@@ -142,7 +159,8 @@ class Database:
     def purge(self, older_than: float) -> None:
         with self.lock:
             self.conn.execute("BEGIN")
-            self.conn.execute("DELETE FROM messages WHERE received_at < ?", (older_than,))
+            self.conn.execute("DELETE FROM messages WHERE received_at < ? AND status NOT IN ('queued', 'relaying')",
+                              (older_than,))
             self.conn.execute("DELETE FROM transcript WHERE session_id IN "
                               "(SELECT id FROM sessions WHERE started_at < ?)", (older_than,))
             self.conn.execute("DELETE FROM sessions WHERE started_at < ?", (older_than,))
@@ -151,8 +169,12 @@ class Database:
     def clear_history(self) -> None:
         with self.lock:
             self.conn.execute("BEGIN")
-            for table in ("messages", "transcript", "sessions"):
-                self.conn.execute(f"DELETE FROM {table}")
+            # Messages still waiting for delivery are kept, together with their sessions.
+            self.conn.execute("DELETE FROM messages WHERE status NOT IN ('queued', 'relaying')")
+            self.conn.execute("DELETE FROM sessions WHERE id NOT IN (SELECT session_id FROM messages "
+                              "WHERE session_id IS NOT NULL) AND (message_id IS NULL OR message_id NOT IN "
+                              "(SELECT id FROM messages))")
+            self.conn.execute("DELETE FROM transcript WHERE session_id NOT IN (SELECT id FROM sessions)")
             self.conn.execute("COMMIT")
         self.execute("VACUUM")
 
