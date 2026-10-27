@@ -115,3 +115,4 @@ form.user button { padding: 3px 10px; font-size: 13px; }
 .wizard-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; gap: 8px; }
 details > .details-body { margin: 0; padding: 0 12px 12px; }
 #account { margin-top: 24px; }
+.test-transcript .transcript { max-height: 360px; }

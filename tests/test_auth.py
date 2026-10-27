@@ -98,6 +98,10 @@ def test_setup_wizard(settings):
     assert r.headers["location"] == "/setup/relay"
     assert settings.get("auth_username") == "me" and settings.get("auth_initial_password") == ""
 
+    r = client.post("/setup/relay", data={"relay_host": "127.0.0.1", "relay_port": "1", "relay_security": "none",
+                                          "action": "test"})
+    assert "SMTP transcript" in r.text and "Connecting to 127.0.0.1:1" in r.text  # inline, no link
+    assert "/sessions/" not in r.text
     r = client.post("/setup/relay", data={"relay_host": "smtp.example.net", "relay_port": "587",
                                           "relay_security": "starttls", "relay_username": "me@example.net",
                                           "relay_password": "pw", "relay_tls_verify": "on"}, follow_redirects=False)
