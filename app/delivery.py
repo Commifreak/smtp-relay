@@ -12,14 +12,13 @@ import smtplib
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from email.message import EmailMessage
-from email.utils import formatdate, make_msgid
 
+from .alerts import Alerts
 from .config import Settings, parse_intervals
 from .db import Database, Transcript
 from .relay import reply_text, send_sync
 from .relays import Relays, as_settings
-from .rewrite import header_meta, prepare, split_message
+from .rewrite import header_meta, prepare
 
 log = logging.getLogger("smtp-relay.queue")
 
@@ -61,6 +60,7 @@ class DeliveryQueue:
         self.db = db
         self.settings = settings
         self.relays = Relays(db)
+        self.alerts = Alerts(db, settings, self)
         self.loop: asyncio.AbstractEventLoop | None = None
         self._wake = asyncio.Event()
 
@@ -152,6 +152,7 @@ class DeliveryQueue:
             self._wake.clear()
             try:
                 await self.process_due()
+                self.alerts.check_queue_backlog()
             except Exception:
                 log.exception("Error while processing the queue")
             try:
@@ -199,6 +200,7 @@ class DeliveryQueue:
         temp: dict[str, tuple[int, str]] = {}
         perm: dict[str, tuple[int, str]] = {}
         upstream = ""
+        relay_error = None  # the relay itself failed (connection, TLS, login), not a single message
         try:
             if relay is None:
                 reason = ("The relay of this message no longer exists" if row["relay_id"]
@@ -217,10 +219,14 @@ class DeliveryQueue:
             target = temp if 400 <= e.smtp_code < 500 else perm
             for rcpt in pending:
                 target[rcpt] = (e.smtp_code, upstream)
+            if relay is not None and isinstance(e, (smtplib.SMTPAuthenticationError, smtplib.SMTPHeloError,
+                                                    smtplib.SMTPConnectError)):
+                relay_error = upstream
         except Exception as e:  # connection problems and anything unexpected: retry later
             upstream = f"{type(e).__name__}: {e}"
             for rcpt in pending:
                 temp[rcpt] = (451, upstream)
+            relay_error = upstream
 
         accepted = [r for r in pending if r not in temp and r not in perm]
         if accepted:
@@ -267,48 +273,12 @@ class DeliveryQueue:
             fields["raw"] = None
         self.db.update_message(message_id, **fields)
 
+        if relay is not None:
+            if relay_error:
+                self.alerts.relay_problem(relay, relay_error, message_id)
+            else:
+                self.alerts.relay_ok(relay)
         if status in ("partial", "failed") and not row["is_notification"]:
-            self._notify(row, settings, relay or self.relays.first(), failed, attempt_no)
+            self.alerts.delivery_failed(row, failed, attempt_no)
         codes = [c for c, _ in perm.values()]
         return AttemptResult(status, detail, max(codes) if codes else 554)
-
-    def _notify(self, row: dict, settings: dict, relay: dict | None, failed: list[str], attempts: int) -> None:
-        to = settings.get("notify_address")
-        if not to or relay is None:
-            return
-        sender = (relay["rewrite_from_address"] if relay["rewrite_enabled"] else "") or relay["username"] or to
-        m = EmailMessage()
-        m["From"] = f"smtp-relay <{sender}>"
-        m["To"] = to
-        m["Subject"] = f"Undeliverable: {row['subject'] or '(no subject)'}"
-        m["Date"] = formatdate(localtime=True)
-        m["Message-ID"] = make_msgid(domain=sender.rsplit("@", 1)[-1])
-        m["Auto-Submitted"] = "auto-generated"
-        client = row["client_ip"] or ""
-        if row["client_name"]:
-            client += f" ({row['client_name']})"
-        lines = [
-            "smtp-relay could not (fully) deliver the following message.",
-            "",
-            f"Message:     #{row['id']}",
-            f"Received:    {_fmt_time(row['received_at'])}",
-            f"Client:      {client}",
-            f"Sender:      {row['mail_from']}",
-            f"Recipients:  {', '.join(json.loads(row['rcpt_to'] or '[]'))}",
-            f"Subject:     {row['subject'] or ''}",
-            f"Attempts:    {attempts}",
-            "",
-            "Failed recipients:",
-            *[f"  - {f}" for f in failed],
-            "",
-            "The full SMTP transcripts are available in the web UI under the message number.",
-        ]
-        m.set_content("\n".join(lines))
-        if row["raw"]:
-            fields, _ = split_message(row["raw"])
-            m.add_attachment(b"".join(fields), maintype="text", subtype="rfc822-headers",
-                             filename="original-headers.txt")
-        raw = m.as_bytes(policy=m.policy.clone(linesep="\r\n"))
-        self.accept(raw=raw, mail_from=sender, rcpts=[to], status="queued", client_ip="smtp-relay",
-                    client_name="Notification", is_notification=1, relay_id=relay["id"])
-        self.wake()

@@ -146,3 +146,4 @@ details > .details-body { margin: 0; padding: 0 12px 12px; }
 #account { margin-top: 24px; }
 .test-transcript .transcript { max-height: 360px; }
 .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.settings label.alert-backlog input[type=number] { display: inline-block; width: 5em; margin: 0 4px; padding: 2px 6px; }

@@ -88,7 +88,7 @@
           <option value="none" {{ 'selected' if r.rewrite_name_mode == 'none' }}>No display name</option>
         </select></label>
     </div>
-    <label>Failure notifications to <small>optional; receives a message when delivery finally fails</small><input name="notify_address" value="{{ s.notify_address }}" placeholder="admin@example.com"></label>
+    <label>Send alerts to <small>optional; e.g. when a message cannot be delivered or a relay fails. Details under Settings → Alerts.</small><input name="alert_address" value="{{ s.alert_address }}" placeholder="admin@example.com"></label>
     <p class="hint">Everything can be changed later under Settings.</p>
     <div class="wizard-nav"><a href="/setup/senders">← Back</a><button class="primary">Finish setup</button></div>
   </form>

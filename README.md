@@ -26,13 +26,14 @@ both SMTP conversations is recorded.
     retried later; by default after 1, 5, 15 and 30 minutes, then every 60 minutes.
   - If the relay temporarily rejects only some recipients, only those are retried.
   - Delivery is given up after the maximum queue lifetime (default 48 h).
-  - Optionally, a notification goes to an admin address when delivery finally fails.
   - The queue survives container restarts; interrupted deliveries are resumed.
 - **Sender rewriting** per relay: the From header (and optionally the envelope sender) is replaced with an
   address that provider accepts.
   - The display name can be kept, or replaced by the original address or a fixed name.
   - Reply-To can be set to the original sender.
   - The original From header is preserved as `X-Original-From`.
+- **Alerts by mail** when a message cannot be delivered, a relay fails, the queue backs up, an unknown sender
+  or client is rejected, or a web UI login fails – each switchable, throttled, with recovery mails
 - **Setup wizard** on first start: account, first relay server (with connection test), its senders, options.
   No configuration files or environment variables needed.
 - **Login** with username and password; the initial password is generated and printed to the container log.
@@ -107,7 +108,7 @@ Prebuilt images for amd64 and arm64 are published to the GitHub Container Regist
 
 4. Open `http://<docker-host>:8080`, log in and follow the setup wizard. It asks for your own credentials,
    the first relay server (with a connection test), the senders it handles and the allowed networks, and
-   optional sender rewriting and failure notifications. More relays can be added afterwards under **Relays**.
+   optional sender rewriting and the alert address. More relays can be added afterwards under **Relays**.
 
 | Login | Setup wizard |
 |-------|--------------|
@@ -232,6 +233,25 @@ verified domain. For services with arbitrary senders (`root@nas.local` …), ena
 enter one of your own addresses as the new sender address. With “Original address as display name” you can
 still see at a glance which service sent the message.
 
+## Alerts
+
+Enter an address under **Settings → Alerts** (or in the setup wizard) to get a mail when something needs
+attention:
+
+| Alert | Default | Sent |
+|---|---|---|
+| A message could not be delivered (finally failed or partially rejected) | on | per message, with the original headers attached |
+| A relay is unreachable or rejects the login | on | once per outage, plus a mail when it works again |
+| Messages wait in the queue longer than N minutes (default 30) | on | once, plus a mail when the queue is empty again |
+| An unknown sender was rejected | on | at most once per sender and day |
+| A connection from a not allowed IP address was refused | off | at most once per address and day |
+| A web UI login failed | on | at most once per address and hour |
+
+Alerts are regular messages in the queue: they are retried, appear in the mail history and have SMTP
+transcripts. They are sent through the relay chosen under **Send through relay**; on *Automatic*, an alert
+about a failing relay goes through another relay if there is one. With the optional **Web UI address**,
+alert mails link to the affected message. **Send test alert** checks the setup.
+
 ## Single sign-on with Authelia
 
 If the web UI is published through a reverse proxy with forward authentication, smtp-relay can log users in
@@ -301,7 +321,8 @@ DATA_DIR=./data python -m app.main
 Layout:
 
 - `app/smtp_server.py`: SMTP listener (aiosmtpd), policy checks and recording of the inbound conversation
-- `app/delivery.py`: queue, delivery attempts, retries and failure notifications
+- `app/delivery.py`: queue, delivery attempts and retries
+- `app/alerts.py`: alert mails and their throttling
 - `app/relay.py`: SMTP connection to the relay (smtplib) with recording of the outbound conversation
 - `app/relays.py`: relay servers and sender-based routing
 - `app/rewrite.py`: header rewriting on the raw message, so the body stays untouched

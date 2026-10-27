@@ -10,7 +10,7 @@
   </form>
   {% if rows %}<form method="post" action="/queue/deliver-all"><button class="primary">Deliver all now</button></form>{% endif %}
 </div>
-<p class="muted">Retries after {{ s.retry_intervals }} minutes (then repeating the last interval), giving up after {{ s.queue_max_age_hours }} h.{% if s.notify_address %} Failure notifications go to {{ s.notify_address }}.{% else %} No failure notification configured.{% endif %}</p>
+<p class="muted">Retries after {{ s.retry_intervals }} minutes (then repeating the last interval), giving up after {{ s.queue_max_age_hours }} h.{% if s.alert_address %} Alerts go to {{ s.alert_address }}.{% else %} No alert address configured.{% endif %}</p>
 <table class="list">
 <thead><tr><th>#</th><th>Received</th><th>Sender</th><th>Pending</th><th>Subject</th><th>Attempts</th><th>Next attempt</th><th>Last error</th><th></th></tr></thead>
 <tbody>

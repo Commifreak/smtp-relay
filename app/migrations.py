@@ -5,6 +5,7 @@ Migrations must be idempotent (existing databases may already contain the change
 a short result text. Pending migrations are announced and reported in a block on stdout when
 the container starts; a backup of the database is taken first.
 """
+import json
 import os
 import sqlite3
 import time
@@ -65,10 +66,22 @@ def _single_relay(db: Database) -> str:
     return f"created relay “{relays.first()['name']}” from the previous relay settings"
 
 
+def _alert_address(db: Database) -> str:
+    stored = db.load_settings()
+    if "notify_address" not in stored:
+        return "nothing to migrate"
+    address = stored["notify_address"]
+    if address and "alert_address" not in stored:
+        db.execute("INSERT INTO settings (key, value) VALUES ('alert_address', ?)", (json.dumps(address),))
+    db.execute("DELETE FROM settings WHERE key = 'notify_address'")
+    return f"alerts go to {address}" if address else "removed the empty notification address"
+
+
 MIGRATIONS = [
     Migration(1, "Add delivery queue columns to messages (1.1)", _queue_columns),
     Migration(2, "Add relay columns to messages (1.3)", lambda db: _add_columns(db, "messages", RELAY_COLUMNS)),
     Migration(3, "Move the single relay configuration into relays (1.3)", _single_relay),
+    Migration(4, "Use the failure notification address for alerts (1.4)", _alert_address),
 ]
 
 

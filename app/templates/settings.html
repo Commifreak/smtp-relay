@@ -24,9 +24,30 @@
   <div class="row">
     <label>Retry intervals (minutes) <small>comma-separated; the last value repeats</small><input name="retry_intervals" value="{{ s.retry_intervals }}"></label>
     <label>Maximum queue lifetime (hours) <small>delivery is given up afterwards</small><input type="number" min="1" name="queue_max_age_hours" value="{{ s.queue_max_age_hours }}"></label>
-    <label>Failure notifications to <small>when delivery finally fails; empty = none</small><input name="notify_address" value="{{ s.notify_address }}" placeholder="admin@example.com"></label>
   </div>
   <div class="row"><label>Relay connection timeout (s)<input type="number" min="1" name="relay_timeout" value="{{ s.relay_timeout }}"></label></div>
+</fieldset>
+
+<fieldset id="alerts">
+  <legend>Alerts</legend>
+  {% if alert_error %}<div class="alert err">No test alert sent: enter an alert address and save first, and make sure a relay is configured.</div>{% endif %}
+  <p class="hint">smtp-relay sends an alert mail when something needs your attention. Alerts go through the queue like any other mail and appear in the mail history.</p>
+  <div class="row">
+    <label>Send alerts to <small>empty = no alerts</small><input name="alert_address" value="{{ s.alert_address }}" placeholder="admin@example.com"></label>
+    <label>Send through relay <small>automatic: prefers a relay other than a failing one</small>
+      <select name="alert_relay_id">
+        <option value="0" {{ 'selected' if not s.alert_relay_id }}>Automatic</option>
+        {% for r in relays %}<option value="{{ r.id }}" {{ 'selected' if s.alert_relay_id == r.id }}>{{ r.name }}</option>{% endfor %}
+      </select></label>
+    <label>Web UI address <small>optional, for links in alert mails</small><input name="public_url" value="{{ s.public_url }}" placeholder="https://smtp-relay.example.com"></label>
+  </div>
+  <label class="check"><input type="checkbox" name="alert_delivery_failed" {{ 'checked' if s.alert_delivery_failed }}> A message could not be delivered (finally failed or partially rejected)</label>
+  <label class="check"><input type="checkbox" name="alert_relay_down" {{ 'checked' if s.alert_relay_down }}> A relay is unreachable or rejects the login – once per outage, plus a mail when it works again</label>
+  <label class="check alert-backlog"><input type="checkbox" name="alert_queue_backlog" {{ 'checked' if s.alert_queue_backlog }}> Messages wait in the queue for more than
+    <input type="number" min="1" name="alert_queue_backlog_minutes" value="{{ s.alert_queue_backlog_minutes }}"> minutes – plus a mail when the queue is empty again</label>
+  <label class="check"><input type="checkbox" name="alert_sender_rejected" {{ 'checked' if s.alert_sender_rejected }}> An unknown sender was rejected – at most once per sender and day</label>
+  <label class="check"><input type="checkbox" name="alert_client_rejected" {{ 'checked' if s.alert_client_rejected }}> A connection from a not allowed IP address was refused – at most once per address and day</label>
+  <label class="check"><input type="checkbox" name="alert_login_failed" {{ 'checked' if s.alert_login_failed }}> A web UI login failed – at most once per address and hour</label>
 </fieldset>
 
 <fieldset>
@@ -58,6 +79,10 @@
   </div>
   <button>Change account</button>
 </fieldset>
+</form>
+
+<form method="post" action="/settings/test-alert" class="settings">
+  <button>Send test alert</button> <span class="muted">to the saved alert address</span>
 </form>
 
 <fieldset class="danger">

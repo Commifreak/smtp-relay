@@ -75,6 +75,11 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     name        TEXT NOT NULL,
     applied_at  REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS alert_state (
+    key         TEXT PRIMARY KEY,       -- e.g. relay:3, queue_backlog, sender:x@example.com
+    active      INTEGER NOT NULL DEFAULT 0,
+    last_sent   REAL
+);
 CREATE TABLE IF NOT EXISTS web_sessions (
     token_hash  TEXT PRIMARY KEY,
     created_at  REAL NOT NULL,
