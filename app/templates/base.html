@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}MTA-Relay{% endblock %} · MTA-Relay</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">MTA-Relay</a>
+  <nav>
+    <a href="/" class="{{ 'active' if request.url.path == '/' or request.url.path.startswith('/messages') }}">Mail-Historie</a>
+    <a href="/sessions" class="{{ 'active' if request.url.path.startswith('/sessions') }}">SMTP-Sitzungen</a>
+    <a href="/tools" class="{{ 'active' if request.url.path.startswith('/tools') }}">Diagnose</a>
+    <a href="/settings" class="{{ 'active' if request.url.path.startswith('/settings') }}">Einstellungen</a>
+  </nav>
+  <label class="live"><input type="checkbox" id="autorefresh"> Auto-Refresh</label>
+</header>
+<main>
+{% if auth_disabled %}<div class="alert warn">Das WebUI ist nicht passwortgeschützt. Setze <code>WEBUI_PASSWORD</code>, um den Zugriff zu beschränken.</div>{% endif %}
+{% block content %}{% endblock %}
+</main>
+<footer>MTA-Relay {{ version }}</footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

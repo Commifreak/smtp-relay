@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, transcript, session_head %}
+{% block title %}Nachricht #{{ msg.id }}{% endblock %}
+{% block content %}
+<h1>Nachricht #{{ msg.id }} {{ badge(msg.status) }}</h1>
+<div class="actions">
+  {% if msg.raw %}
+  <a class="btn" href="/messages/{{ msg.id }}/eml">Original (.eml) herunterladen</a>
+  <form method="post" action="/messages/{{ msg.id }}/resend" onsubmit="return confirm('Nachricht erneut an das Relay senden?')"><button>Erneut senden</button></form>
+  {% endif %}
+</div>
+<table class="kv">
+  <tr><th>Empfangen</th><td>{{ msg.received_at|ts }}</td></tr>
+  <tr><th>Client</th><td>{{ msg.client_ip }}{% if msg.client_name %} · {{ msg.client_name }}{% endif %}{% if msg.helo %} · HELO {{ msg.helo }}{% endif %}</td></tr>
+  <tr><th>Envelope-Absender</th><td>{{ msg.mail_from }}</td></tr>
+  <tr><th>Envelope-Empfänger</th><td>{{ (msg.rcpt_to|fromjson)|join(', ') }}</td></tr>
+  <tr><th>From (Header)</th><td>{{ msg.from_header or '' }}</td></tr>
+  <tr><th>To (Header)</th><td>{{ msg.to_header or '' }}</td></tr>
+  <tr><th>Betreff</th><td>{{ msg.subject or '' }}</td></tr>
+  <tr><th>Message-ID</th><td>{{ msg.message_id_header or '' }}</td></tr>
+  <tr><th>Größe</th><td>{{ msg.size|size }}</td></tr>
+  {% if msg.relay_from %}<tr><th>Absender zum Relay</th><td>{{ msg.relay_from }}</td></tr>{% endif %}
+  {% if msg.relayed_at %}<tr><th>Zugestellt</th><td>{{ msg.relayed_at|ts }}</td></tr>{% endif %}
+  <tr><th>Ergebnis</th><td class="{{ 'err' if msg.status in ('failed', 'deferred', 'rejected') }}">{{ msg.detail or '' }}</td></tr>
+</table>
+
+<h2>Inhalt</h2>
+{% if not msg.raw %}
+<p class="muted">Kein Inhalt gespeichert{% if msg.status != 'rejected' %} (Option „Inhalte speichern“ ist deaktiviert){% endif %}.</p>
+{% else %}
+{% if parts.error %}<div class="alert warn">Nachricht konnte nicht vollständig geparst werden: {{ parts.error }}</div>{% endif %}
+{% if parts.attachments %}
+<p><strong>Anhänge:</strong> {% for a in parts.attachments %}{{ a[0] }} ({{ a[1] }}, {{ a[2]|size }}){{ ', ' if not loop.last }}{% endfor %}</p>
+{% endif %}
+<details open><summary>Text</summary>
+  {% if parts.text %}<pre class="body">{{ parts.text }}</pre>{% else %}<p class="muted">Kein Text-Teil vorhanden.</p>{% endif %}
+</details>
+{% if parts.html %}
+<details><summary>HTML (abgeschottete Vorschau)</summary>
+  <iframe class="html-preview" sandbox="" srcdoc="{{ parts.html }}"></iframe>
+</details>
+{% endif %}
+<details><summary>Header ({{ parts.headers|length }})</summary>
+  <table class="kv small">{% for k, v in parts.headers %}<tr><th>{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}</table>
+</details>
+<details><summary>Rohdaten (wie vom Client empfangen)</summary>
+  <pre class="body">{{ raw_text }}</pre>
+</details>
+{% endif %}
+
+<h2>Kommunikation: Client → MTA-Relay</h2>
+{% if inbound %}
+<p class="meta">{{ session_head(inbound) }}</p>
+{{ transcript(inbound) }}
+{% else %}
+<p class="muted">Keine eingehende SMTP-Sitzung (z. B. Testmail aus dem WebUI).</p>
+{% endif %}
+
+<h2 id="outbound">Kommunikation: MTA-Relay → Relay-Server</h2>
+{% for s in outbound %}
+<p class="meta">{{ session_head(s) }}</p>
+{{ transcript(s) }}
+{% else %}
+<p class="muted">Keine Weiterleitung erfolgt.</p>
+{% endfor %}
+{% endblock %}

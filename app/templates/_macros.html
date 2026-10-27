@@ -1,0 +1,21 @@
+{% macro badge(status) -%}
+<span class="badge st-{{ status }}">{{ STATUS_LABELS.get(status, status) }}</span>
+{%- endmacro %}
+
+{% macro transcript(session) -%}
+{% set labels = {'C': 'Client → Relay', 'S': 'Relay → Client'} if session.kind == 'inbound' else {'C': 'Relay → Upstream', 'S': 'Upstream → Relay'} %}
+<div class="transcript">
+{% for l in session.lines %}
+<div class="tl d-{{ l.dir }}"><span class="t">{{ l.ts|ts(true) }}</span><span class="d" title="{{ labels.get(l.dir, '') }}">{% if l.dir == 'C' %}C:{% elif l.dir == 'S' %}S:{% elif l.dir == 'E' %}!!{% else %}--{% endif %}</span><span class="l">{{ l.line }}</span></div>
+{% else %}
+<div class="tl muted">Keine Protokollzeilen.</div>
+{% endfor %}
+</div>
+<p class="legend">C: {{ labels.C }} · S: {{ labels.S }} · --: Info · !!: Fehler</p>
+{%- endmacro %}
+
+{% macro session_head(s) -%}
+<a href="/sessions/{{ s.id }}">Sitzung #{{ s.id }}</a> · {{ KIND_LABELS.get(s.kind, s.kind) }} · {{ s.peer }}{% if s.peer_name %} ({{ s.peer_name }}){% endif %}
+· {{ s.started_at|ts }}{% if s.ended_at %} · Dauer {{ '%.2f'|format(s.ended_at - s.started_at) }} s{% endif %}
+{% if s.result %} · {{ badge(s.result) if s.result in STATUS_LABELS else s.result }}{% endif %}
+{%- endmacro %}

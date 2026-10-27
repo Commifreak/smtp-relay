@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen{% endblock %}
+{% block content %}
+<h1>Einstellungen</h1>
+{% if saved %}<div class="alert ok">Einstellungen gespeichert und sofort aktiv.</div>{% endif %}
+{% for e in errors %}<div class="alert err">{{ e }}</div>{% endfor %}
+<form method="post" class="settings">
+<fieldset>
+  <legend>Annahme (lokales Netz)</legend>
+  <label>Erlaubte Absender <small>eine Adresse pro Zeile · <code>dienst@example.de</code>, <code>@example.de</code> (ganze Domain) oder <code>*</code> (alle)</small>
+    <textarea name="allowed_senders" rows="6">{{ s.allowed_senders|join('\n') }}</textarea></label>
+  <label>Erlaubte Client-Netze <small>CIDR, eine pro Zeile – Verbindungen von anderen IPs werden sofort abgewiesen</small>
+    <textarea name="allowed_networks" rows="5">{{ s.allowed_networks|join('\n') }}</textarea></label>
+  <label>Erlaubte Empfänger <small>optional; leer = alle Empfänger erlaubt</small>
+    <textarea name="allowed_recipients" rows="3">{{ s.allowed_recipients|join('\n') }}</textarea></label>
+  <div class="row">
+    <label>Hostname (SMTP-Banner / EHLO)<input name="smtp_hostname" value="{{ s.smtp_hostname }}"></label>
+    <label>Max. Nachrichtengröße (MB, 0 = unbegrenzt)<input type="number" min="0" name="max_message_size_mb" value="{{ s.max_message_size_mb }}"></label>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Relay-Server (Upstream)</legend>
+  <div class="row">
+    <label>Host<input name="relay_host" value="{{ s.relay_host }}"></label>
+    <label>Port<input type="number" name="relay_port" value="{{ s.relay_port }}"></label>
+    <label>Verschlüsselung
+      <select name="relay_security">
+        <option value="ssl" {{ 'selected' if s.relay_security == 'ssl' }}>SSL/TLS (implizit, meist Port 465)</option>
+        <option value="starttls" {{ 'selected' if s.relay_security == 'starttls' }}>STARTTLS (meist Port 587)</option>
+        <option value="none" {{ 'selected' if s.relay_security == 'none' }}>Keine (unverschlüsselt)</option>
+      </select></label>
+  </div>
+  <div class="row">
+    <label>Benutzername<input name="relay_username" value="{{ s.relay_username }}" autocomplete="off"></label>
+    <label>Passwort <small>{{ 'gespeichert – leer lassen, um es zu behalten' if s.relay_password else 'nicht gesetzt' }}</small>
+      <input type="password" name="relay_password" value="" autocomplete="new-password"></label>
+    <label>Timeout (s)<input type="number" min="1" name="relay_timeout" value="{{ s.relay_timeout }}"></label>
+  </div>
+  <label class="check"><input type="checkbox" name="relay_tls_verify" {{ 'checked' if s.relay_tls_verify }}> TLS-Zertifikat des Relays prüfen</label>
+  {% if s.relay_password %}<label class="check"><input type="checkbox" name="clear_password"> Gespeichertes Passwort löschen</label>{% endif %}
+</fieldset>
+
+<fieldset>
+  <legend>Absender umschreiben</legend>
+  <p class="hint">mailbox.org nimmt nur Absenderadressen an, die zu deinem Konto gehören (Hauptadresse, Alias oder eigene Domain). Interne Dienste mit anderen Absendern lassen sich damit trotzdem zustellen.</p>
+  <label class="check"><input type="checkbox" name="rewrite_enabled" {{ 'checked' if s.rewrite_enabled }}> From-Header umschreiben</label>
+  <div class="row">
+    <label>Neue Absenderadresse<input name="rewrite_from_address" value="{{ s.rewrite_from_address }}" placeholder="relay@deinedomain.de"></label>
+    <label>Anzeigename
+      <select name="rewrite_name_mode">
+        <option value="keep" {{ 'selected' if s.rewrite_name_mode == 'keep' }}>Original-Anzeigename übernehmen</option>
+        <option value="address" {{ 'selected' if s.rewrite_name_mode == 'address' }}>Originaladresse als Anzeigename</option>
+        <option value="fixed" {{ 'selected' if s.rewrite_name_mode == 'fixed' }}>Fester Name</option>
+        <option value="none" {{ 'selected' if s.rewrite_name_mode == 'none' }}>Kein Anzeigename</option>
+      </select></label>
+    <label>Fester Name<input name="rewrite_fixed_name" value="{{ s.rewrite_fixed_name }}" placeholder="Heimnetz"></label>
+  </div>
+  <label class="check"><input type="checkbox" name="rewrite_envelope" {{ 'checked' if s.rewrite_envelope }}> Auch Envelope-Absender (MAIL FROM) umschreiben</label>
+  <label class="check"><input type="checkbox" name="rewrite_set_reply_to" {{ 'checked' if s.rewrite_set_reply_to }}> Originaladresse als Reply-To setzen (falls nicht vorhanden)</label>
+  <p class="hint">Der ursprüngliche From-Header bleibt immer als <code>X-Original-From</code> erhalten.</p>
+</fieldset>
+
+<fieldset>
+  <legend>Header & Historie</legend>
+  <label class="check"><input type="checkbox" name="add_received_header" {{ 'checked' if s.add_received_header }}> Received-Header hinzufügen (Nachverfolgbarkeit)</label>
+  <label class="check"><input type="checkbox" name="add_missing_headers" {{ 'checked' if s.add_missing_headers }}> Fehlende Date-/Message-ID-Header ergänzen</label>
+  <label class="check"><input type="checkbox" name="store_content" {{ 'checked' if s.store_content }}> Mail-Inhalte speichern (für Anzeige und „Erneut senden“)</label>
+  <div class="row"><label>Aufbewahrung (Tage, 0 = unbegrenzt)<input type="number" min="0" name="retention_days" value="{{ s.retention_days }}"></label></div>
+</fieldset>
+<button class="primary">Speichern</button>
+</form>
+
+<fieldset class="danger">
+  <legend>Wartung</legend>
+  <form method="post" action="/settings/clear-history" onsubmit="return confirm('Gesamte Historie inkl. aller Protokolle löschen?')">
+    <button class="danger">Gesamte Historie löschen</button>
+  </form>
+</fieldset>
+{% endblock %}

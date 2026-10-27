@@ -1,0 +1,15 @@
+services:
+  mta-relay:
+    build: .
+    image: mta-relay:latest
+    container_name: mta-relay
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "25:2525"     # SMTP aus dem lokalen Netz
+      - "8080:8080"   # WebUI
+    volumes:
+      - mta-relay-data:/data
+
+volumes:
+  mta-relay-data:

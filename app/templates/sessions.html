@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge %}
+{% block title %}SMTP-Sitzungen{% endblock %}
+{% block content %}
+<p class="muted">Alle SMTP-Verbindungen – auch solche ohne Mail (abgelehnte Clients, Portscans, Verbindungstests).</p>
+<form class="filters" method="get">
+  <input type="search" name="q" value="{{ q }}" placeholder="Suche: IP, Hostname, HELO, Ergebnis …">
+  <select name="kind">
+    <option value="">Alle Typen</option>
+    {% for k, label in KIND_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ label }}</option>{% endfor %}
+  </select>
+  <button>Filtern</button>
+</form>
+<table class="list">
+<thead><tr><th>#</th><th>Typ</th><th>Start</th><th>Dauer</th><th>Gegenstelle</th><th>HELO</th><th>Zeilen</th><th>Mails</th><th>Ergebnis</th></tr></thead>
+<tbody>
+{% for s in rows %}
+<tr class="clickable" data-href="/sessions/{{ s.id }}">
+  <td><a href="/sessions/{{ s.id }}">{{ s.id }}</a></td>
+  <td><span class="kind k-{{ s.kind }}">{{ KIND_LABELS.get(s.kind, s.kind) }}</span></td>
+  <td class="nowrap">{{ s.started_at|ts }}</td>
+  <td class="nowrap">{% if s.ended_at %}{{ '%.2f'|format(s.ended_at - s.started_at) }} s{% else %}<span class="muted">offen</span>{% endif %}</td>
+  <td>{{ s.peer }}{% if s.peer_name %}<div class="sub">{{ s.peer_name }}</div>{% endif %}</td>
+  <td>{{ s.helo or '' }}</td>
+  <td>{{ s.line_count }}</td>
+  <td>{% if s.kind == 'inbound' %}{% for mid in (s.message_ids or '').split(',') if mid %}<a href="/messages/{{ mid }}">#{{ mid }}</a> {% endfor %}{% elif s.message_id %}<a href="/messages/{{ s.message_id }}">#{{ s.message_id }}</a>{% endif %}</td>
+  <td>{% if s.result in STATUS_LABELS %}{{ badge(s.result) }}{% else %}{{ s.result or '' }}{% endif %}</td>
+</tr>
+{% else %}
+<tr><td colspan="9" class="muted center">Keine Sitzungen.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+<div class="pager">
+  {% if page > 1 %}<a href="/sessions?{{ qs(page=page-1) }}">← Neuer</a>{% endif %}
+  {% if has_next %}<a href="/sessions?{{ qs(page=page+1) }}">Älter →</a>{% endif %}
+</div>
+{% endblock %}
