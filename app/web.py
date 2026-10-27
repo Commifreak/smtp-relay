@@ -25,11 +25,11 @@ from .rewrite import message_parts
 BASE = Path(__file__).parent
 PAGE_SIZE = 100
 STATUSES = ["relayed", "partial", "queued", "failed", "rejected", "relaying"]
-STATUS_LABELS = {"relayed": "zugestellt", "partial": "teilweise", "queued": "in Warteschlange",
-                 "failed": "fehlgeschlagen", "rejected": "abgelehnt", "relaying": "wird zugestellt",
+STATUS_LABELS = {"relayed": "relayed", "partial": "partial", "queued": "queued",
+                 "failed": "failed", "rejected": "rejected", "relaying": "relaying",
                  # statuses of the first release, still present in older histories
-                 "deferred": "temporär fehlgeschlagen", "received": "angenommen"}
-KIND_LABELS = {"inbound": "Eingehend", "outbound": "Relay", "test": "Verbindungstest"}
+                 "deferred": "deferred", "received": "received"}
+KIND_LABELS = {"inbound": "Inbound", "outbound": "Relay", "test": "Connection test"}
 
 
 def fmt_ts(ts, with_ms=False):
@@ -38,7 +38,7 @@ def fmt_ts(ts, with_ms=False):
     dt = datetime.fromtimestamp(ts)
     if with_ms:
         return dt.strftime("%H:%M:%S.") + f"{dt.microsecond // 1000:03d}"
-    return dt.strftime("%d.%m.%Y %H:%M:%S")
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def fmt_size(n):
@@ -73,12 +73,12 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
                 secrets.compare_digest(creds.username.encode(), user.encode()) and \
                 secrets.compare_digest(creds.password.encode(), password.encode())
             if not ok:
-                raise HTTPException(401, "Anmeldung erforderlich", {"WWW-Authenticate": 'Basic realm="MTA-Relay"'})
+                raise HTTPException(401, "Authentication required", {"WWW-Authenticate": 'Basic realm="MTA-Relay"'})
         if request.method == "POST":
             # Basic CSRF protection: POSTs must originate from this UI.
             origin = request.headers.get("origin") or request.headers.get("referer")
             if origin and urlparse(origin).netloc != request.headers.get("host"):
-                raise HTTPException(403, "Ungültige Herkunft der Anfrage")
+                raise HTTPException(403, "Invalid request origin")
 
     def render(request, name, **ctx):
         return templates.TemplateResponse(request, name, ctx)
@@ -114,7 +114,7 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
     def message_detail(request: Request, message_id: int):
         msg = db.query_one("SELECT * FROM messages WHERE id = ?", (message_id,))
         if not msg:
-            raise HTTPException(404, "Nachricht nicht gefunden")
+            raise HTTPException(404, "Message not found")
         parts = message_parts(msg["raw"]) if msg["raw"] else None
         raw_text = msg["raw"].decode("utf-8", "replace") if msg["raw"] else None
         inbound = None
@@ -132,7 +132,7 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
     def message_eml(message_id: int):
         msg = db.query_one("SELECT raw FROM messages WHERE id = ?", (message_id,))
         if not msg or not msg["raw"]:
-            raise HTTPException(404, "Kein Inhalt gespeichert")
+            raise HTTPException(404, "No content stored")
         return Response(msg["raw"], media_type="message/rfc822",
                         headers={"Content-Disposition": f'attachment; filename="message-{message_id}.eml"'})
 
@@ -140,8 +140,8 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
     async def message_resend(message_id: int):
         result = await queue.resend(message_id)
         if result is None:
-            raise HTTPException(400, "Erneutes Senden nicht möglich: kein Inhalt gespeichert "
-                                     "oder Nachricht noch in Zustellung")
+            raise HTTPException(400, "Cannot resend: no content stored "
+                                     "or message still being delivered")
         return RedirectResponse(f"/messages/{message_id}#outbound", status_code=303)
 
     @app.get("/queue", response_class=HTMLResponse, dependencies=[Depends(auth)])
@@ -199,7 +199,7 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
     def session_detail(request: Request, session_id: int):
         s = db.query_one("SELECT * FROM sessions WHERE id = ?", (session_id,))
         if not s:
-            raise HTTPException(404, "Sitzung nicht gefunden")
+            raise HTTPException(404, "Session not found")
         s["lines"] = db.transcript(session_id)
         msgs = db.query("SELECT id, mail_from, subject, status FROM messages WHERE session_id = ? OR id = ?",
                         (session_id, s["message_id"] or -1))
@@ -253,17 +253,17 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         sender = str(form.get("from", "")).strip()
         rcpt = str(form.get("to", "")).strip()
         if not sender or not rcpt:
-            raise HTTPException(400, "Absender und Empfänger erforderlich")
+            raise HTTPException(400, "Sender and recipient are required")
         m = EmailMessage()
         m["From"] = sender
         m["To"] = rcpt
-        m["Subject"] = str(form.get("subject") or "MTA-Relay Testmail")
+        m["Subject"] = str(form.get("subject") or "MTA-Relay test message")
         m["Date"] = formatdate(localtime=True)
         m["Message-ID"] = make_msgid(domain=sender.rsplit("@", 1)[-1])
-        m.set_content(str(form.get("body") or "Dies ist eine Testmail von MTA-Relay."))
+        m.set_content(str(form.get("body") or "This is a test message from MTA-Relay."))
         raw = m.as_bytes(policy=m.policy.clone(linesep="\r\n"))
         message_id = queue.accept(raw=raw, mail_from=sender, rcpts=[rcpt], client_ip="WebUI",
-                                  client_name="Testmail")
+                                  client_name="Test message")
         await queue.attempt(message_id)
         return RedirectResponse(f"/messages/{message_id}", status_code=303)
 

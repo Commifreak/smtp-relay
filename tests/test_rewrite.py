@@ -4,9 +4,9 @@ import email.policy
 from app.config import DEFAULTS
 from app.rewrite import header_meta, prepare
 
-RAW = (b"From: =?utf-8?q?Gr=C3=BC=C3=9Fe_NAS?= <nas@intern.lan>\r\n"
+RAW = (b"From: =?utf-8?q?Zo=C3=AB=27s_NAS?= <nas@intern.lan>\r\n"
        b"To: me@example.de\r\n"
-       b"Subject: =?utf-8?q?Pr=C3=BCfung?=\r\n"
+       b"Subject: =?utf-8?q?R=C3=A9sum=C3=A9?=\r\n"
        b"\r\n"
        b"Body line 1\r\nBody line 2\r\n")
 
@@ -21,7 +21,7 @@ def parse(data):
 
 def test_header_meta():
     meta = header_meta(RAW)
-    assert meta["subject"] == "Prüfung"
+    assert meta["subject"] == "Résumé"
     assert "nas@intern.lan" in meta["from_header"]
 
 
@@ -37,7 +37,7 @@ def test_rewrite_keep_name():
     data, env_from, notes = prepare(RAW, "nas@intern.lan", s)
     msg = parse(data)
     assert msg["From"].addresses[0].addr_spec == "relay@example.de"
-    assert msg["From"].addresses[0].display_name == "Grüße NAS"
+    assert msg["From"].addresses[0].display_name == "Zoë's NAS"
     assert "nas@intern.lan" in str(msg["Reply-To"])
     assert "nas@intern.lan" in str(msg["X-Original-From"])
     assert env_from == "relay@example.de"

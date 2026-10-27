@@ -1,25 +1,25 @@
 {% extends "base.html" %}
 {% from "_macros.html" import badge %}
-{% block title %}SMTP-Sitzungen{% endblock %}
+{% block title %}SMTP sessions{% endblock %}
 {% block content %}
-<p class="muted">Alle SMTP-Verbindungen – auch solche ohne Mail (abgelehnte Clients, Portscans, Verbindungstests).</p>
+<p class="muted">All SMTP connections – including those without mail (rejected clients, port scans, connection tests).</p>
 <form class="filters" method="get">
-  <input type="search" name="q" value="{{ q }}" placeholder="Suche: IP, Hostname, HELO, Ergebnis …">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search: IP, hostname, HELO, result …">
   <select name="kind">
-    <option value="">Alle Typen</option>
+    <option value="">All types</option>
     {% for k, label in KIND_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ label }}</option>{% endfor %}
   </select>
-  <button>Filtern</button>
+  <button>Filter</button>
 </form>
 <table class="list">
-<thead><tr><th>#</th><th>Typ</th><th>Start</th><th>Dauer</th><th>Gegenstelle</th><th>HELO</th><th>Zeilen</th><th>Mails</th><th>Ergebnis</th></tr></thead>
+<thead><tr><th>#</th><th>Type</th><th>Started</th><th>Duration</th><th>Peer</th><th>HELO</th><th>Lines</th><th>Messages</th><th>Result</th></tr></thead>
 <tbody>
 {% for s in rows %}
 <tr class="clickable" data-href="/sessions/{{ s.id }}">
   <td><a href="/sessions/{{ s.id }}">{{ s.id }}</a></td>
   <td><span class="kind k-{{ s.kind }}">{{ KIND_LABELS.get(s.kind, s.kind) }}</span></td>
   <td class="nowrap">{{ s.started_at|ts }}</td>
-  <td class="nowrap">{% if s.ended_at %}{{ '%.2f'|format(s.ended_at - s.started_at) }} s{% else %}<span class="muted">offen</span>{% endif %}</td>
+  <td class="nowrap">{% if s.ended_at %}{{ '%.2f'|format(s.ended_at - s.started_at) }} s{% else %}<span class="muted">open</span>{% endif %}</td>
   <td>{{ s.peer }}{% if s.peer_name %}<div class="sub">{{ s.peer_name }}</div>{% endif %}</td>
   <td>{{ s.helo or '' }}</td>
   <td>{{ s.line_count }}</td>
@@ -27,12 +27,12 @@
   <td>{% if s.result in STATUS_LABELS %}{{ badge(s.result) }}{% else %}{{ s.result or '' }}{% endif %}</td>
 </tr>
 {% else %}
-<tr><td colspan="9" class="muted center">Keine Sitzungen.</td></tr>
+<tr><td colspan="9" class="muted center">No sessions.</td></tr>
 {% endfor %}
 </tbody>
 </table>
 <div class="pager">
-  {% if page > 1 %}<a href="/sessions?{{ qs(page=page-1) }}">← Neuer</a>{% endif %}
-  {% if has_next %}<a href="/sessions?{{ qs(page=page+1) }}">Älter →</a>{% endif %}
+  {% if page > 1 %}<a href="/sessions?{{ qs(page=page-1) }}">← Newer</a>{% endif %}
+  {% if has_next %}<a href="/sessions?{{ qs(page=page+1) }}">Older →</a>{% endif %}
 </div>
 {% endblock %}

@@ -21,7 +21,7 @@ def load_tls_context() -> ssl.SSLContext | None:
     if cert and key and os.path.exists(cert) and os.path.exists(key):
         ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         ctx.load_cert_chain(cert, key)
-        log.info("STARTTLS aktiviert mit %s", cert)
+        log.info("STARTTLS enabled with %s", cert)
         return ctx
     return None
 
@@ -33,7 +33,7 @@ async def purge_loop(db: Database, settings: Settings) -> None:
             try:
                 db.purge(time.time() - days * 86400)
             except Exception:
-                log.exception("Bereinigung fehlgeschlagen")
+                log.exception("Cleanup failed")
         await asyncio.sleep(3600)
 
 
@@ -53,9 +53,9 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     server = await loop.create_server(protocol_factory(db, settings, queue, load_tls_context()),
                                       host=smtp_host, port=smtp_port)
-    log.info("SMTP lauscht auf Port %s, WebUI auf Port %s", smtp_port, web_port)
+    log.info("SMTP listening on port %s, web UI on port %s", smtp_port, web_port)
     if not settings.get("allowed_senders"):
-        log.warning("Keine erlaubten Absender konfiguriert – es werden alle Mails abgelehnt")
+        log.warning("No allowed senders configured – all mail will be rejected")
 
     web = uvicorn.Server(uvicorn.Config(create_app(db, settings, queue), host="0.0.0.0", port=web_port,
                                         log_level="warning", proxy_headers=True))

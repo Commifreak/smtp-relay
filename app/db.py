@@ -137,7 +137,7 @@ class Database:
 
     def add_line(self, session_id: int, direction: str, line: str) -> None:
         if len(line) > MAX_LINE:
-            line = line[:MAX_LINE] + f" … [{len(line) - MAX_LINE} Zeichen gekürzt]"
+            line = line[:MAX_LINE] + f" … [{len(line) - MAX_LINE} characters truncated]"
         self.execute("INSERT INTO transcript (session_id, ts, dir, line) VALUES (?, ?, ?, ?)",
                      (session_id, time.time(), direction, line))
 

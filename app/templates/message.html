@@ -1,74 +1,74 @@
 {% extends "base.html" %}
 {% from "_macros.html" import badge, transcript, session_head %}
-{% block title %}Nachricht #{{ msg.id }}{% endblock %}
+{% block title %}Message #{{ msg.id }}{% endblock %}
 {% block content %}
-<h1>Nachricht #{{ msg.id }} {{ badge(msg.status) }}</h1>
+<h1>Message #{{ msg.id }} {{ badge(msg.status) }}</h1>
 <div class="actions">
-  {% if msg.raw %}<a class="btn" href="/messages/{{ msg.id }}/eml">Original (.eml) herunterladen</a>{% endif %}
+  {% if msg.raw %}<a class="btn" href="/messages/{{ msg.id }}/eml">Download original (.eml)</a>{% endif %}
   {% if msg.status == 'queued' %}
-  <form method="post" action="/queue/{{ msg.id }}/deliver"><button class="primary">Jetzt zustellen</button></form>
-  <form method="post" action="/queue/{{ msg.id }}/remove" onsubmit="return confirm('Nachricht aus der Warteschlange entfernen? Sie wird nicht mehr zugestellt.')"><button class="danger">Aus Warteschlange entfernen</button></form>
+  <form method="post" action="/queue/{{ msg.id }}/deliver"><button class="primary">Deliver now</button></form>
+  <form method="post" action="/queue/{{ msg.id }}/remove" onsubmit="return confirm('Remove this message from the queue? It will not be delivered.')"><button class="danger">Remove from queue</button></form>
   {% elif msg.raw and msg.status in ('relayed', 'partial', 'failed') %}
-  <form method="post" action="/messages/{{ msg.id }}/resend" onsubmit="return confirm('Nachricht erneut an alle Empfänger senden?')"><button>Erneut senden</button></form>
+  <form method="post" action="/messages/{{ msg.id }}/resend" onsubmit="return confirm('Send this message again to all recipients?')"><button>Resend</button></form>
   {% endif %}
 </div>
 <table class="kv">
-  <tr><th>Empfangen</th><td>{{ msg.received_at|ts }}</td></tr>
+  <tr><th>Received</th><td>{{ msg.received_at|ts }}</td></tr>
   <tr><th>Client</th><td>{{ msg.client_ip }}{% if msg.client_name %} · {{ msg.client_name }}{% endif %}{% if msg.helo %} · HELO {{ msg.helo }}{% endif %}</td></tr>
-  <tr><th>Envelope-Absender</th><td>{{ msg.mail_from }}</td></tr>
-  <tr><th>Envelope-Empfänger</th><td>{{ (msg.rcpt_to|fromjson)|join(', ') }}</td></tr>
-  <tr><th>From (Header)</th><td>{{ msg.from_header or '' }}</td></tr>
-  <tr><th>To (Header)</th><td>{{ msg.to_header or '' }}</td></tr>
-  <tr><th>Betreff</th><td>{{ msg.subject or '' }}</td></tr>
+  <tr><th>Envelope sender</th><td>{{ msg.mail_from }}</td></tr>
+  <tr><th>Envelope recipients</th><td>{{ (msg.rcpt_to|fromjson)|join(', ') }}</td></tr>
+  <tr><th>From (header)</th><td>{{ msg.from_header or '' }}</td></tr>
+  <tr><th>To (header)</th><td>{{ msg.to_header or '' }}</td></tr>
+  <tr><th>Subject</th><td>{{ msg.subject or '' }}</td></tr>
   <tr><th>Message-ID</th><td>{{ msg.message_id_header or '' }}</td></tr>
-  <tr><th>Größe</th><td>{{ msg.size|size }}</td></tr>
-  {% if msg.attempts %}<tr><th>Zustellversuche</th><td>{{ msg.attempts }}{% if msg.last_attempt_at %} · zuletzt {{ msg.last_attempt_at|ts }}{% endif %}</td></tr>{% endif %}
-  {% if msg.status == 'queued' and msg.next_attempt_at %}<tr><th>Nächster Versuch</th><td>{{ msg.next_attempt_at|ts }}{% if queue_paused %} <span class="muted">(Warteschlange angehalten)</span>{% endif %}</td></tr>{% endif %}
-  {% if (msg.pending_rcpts|fromjson) %}<tr><th>Ausstehend</th><td>{{ (msg.pending_rcpts|fromjson)|join(', ') }}</td></tr>{% endif %}
-  {% if (msg.delivered_rcpts|fromjson) %}<tr><th>Zugestellt an</th><td>{{ (msg.delivered_rcpts|fromjson)|join(', ') }}</td></tr>{% endif %}
-  {% if (msg.failed_rcpts|fromjson) %}<tr><th>Fehlgeschlagen</th><td class="err">{% for f in msg.failed_rcpts|fromjson %}{{ f }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>{% endif %}
-  {% if msg.relay_from %}<tr><th>Absender zum Relay</th><td>{{ msg.relay_from }}</td></tr>{% endif %}
-  {% if msg.relayed_at %}<tr><th>Zugestellt</th><td>{{ msg.relayed_at|ts }}</td></tr>{% endif %}
-  <tr><th>Ergebnis</th><td class="{{ 'err' if msg.status in ('failed', 'deferred', 'rejected') }}">{{ msg.detail or '' }}</td></tr>
+  <tr><th>Size</th><td>{{ msg.size|size }}</td></tr>
+  {% if msg.attempts %}<tr><th>Delivery attempts</th><td>{{ msg.attempts }}{% if msg.last_attempt_at %} · last {{ msg.last_attempt_at|ts }}{% endif %}</td></tr>{% endif %}
+  {% if msg.status == 'queued' and msg.next_attempt_at %}<tr><th>Next attempt</th><td>{{ msg.next_attempt_at|ts }}{% if queue_paused %} <span class="muted">(queue paused)</span>{% endif %}</td></tr>{% endif %}
+  {% if (msg.pending_rcpts|fromjson) %}<tr><th>Pending</th><td>{{ (msg.pending_rcpts|fromjson)|join(', ') }}</td></tr>{% endif %}
+  {% if (msg.delivered_rcpts|fromjson) %}<tr><th>Delivered to</th><td>{{ (msg.delivered_rcpts|fromjson)|join(', ') }}</td></tr>{% endif %}
+  {% if (msg.failed_rcpts|fromjson) %}<tr><th>Failed</th><td class="err">{% for f in msg.failed_rcpts|fromjson %}{{ f }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>{% endif %}
+  {% if msg.relay_from %}<tr><th>Sender sent to relay</th><td>{{ msg.relay_from }}</td></tr>{% endif %}
+  {% if msg.relayed_at %}<tr><th>Relayed</th><td>{{ msg.relayed_at|ts }}</td></tr>{% endif %}
+  <tr><th>Result</th><td class="{{ 'err' if msg.status in ('failed', 'deferred', 'rejected') }}">{{ msg.detail or '' }}</td></tr>
 </table>
 
-<h2>Inhalt</h2>
+<h2>Content</h2>
 {% if not msg.raw %}
-<p class="muted">Kein Inhalt gespeichert{% if msg.status != 'rejected' %} (Option „Mail-Inhalte speichern“ ist deaktiviert; der Inhalt wird nach Abschluss der Zustellung gelöscht){% endif %}.</p>
+<p class="muted">No content stored{% if msg.status != 'rejected' %} (“Keep message content” is disabled; content is deleted once delivery is finished){% endif %}.</p>
 {% else %}
-{% if parts.error %}<div class="alert warn">Nachricht konnte nicht vollständig geparst werden: {{ parts.error }}</div>{% endif %}
+{% if parts.error %}<div class="alert warn">The message could not be fully parsed: {{ parts.error }}</div>{% endif %}
 {% if parts.attachments %}
-<p><strong>Anhänge:</strong> {% for a in parts.attachments %}{{ a[0] }} ({{ a[1] }}, {{ a[2]|size }}){{ ', ' if not loop.last }}{% endfor %}</p>
+<p><strong>Attachments:</strong> {% for a in parts.attachments %}{{ a[0] }} ({{ a[1] }}, {{ a[2]|size }}){{ ', ' if not loop.last }}{% endfor %}</p>
 {% endif %}
 <details open><summary>Text</summary>
-  {% if parts.text %}<pre class="body">{{ parts.text }}</pre>{% else %}<p class="muted">Kein Text-Teil vorhanden.</p>{% endif %}
+  {% if parts.text %}<pre class="body">{{ parts.text }}</pre>{% else %}<p class="muted">No text part.</p>{% endif %}
 </details>
 {% if parts.html %}
-<details><summary>HTML (abgeschottete Vorschau)</summary>
+<details><summary>HTML (sandboxed preview)</summary>
   <iframe class="html-preview" sandbox="" srcdoc="{{ parts.html }}"></iframe>
 </details>
 {% endif %}
-<details><summary>Header ({{ parts.headers|length }})</summary>
+<details><summary>Headers ({{ parts.headers|length }})</summary>
   <table class="kv small">{% for k, v in parts.headers %}<tr><th>{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}</table>
 </details>
-<details><summary>Rohdaten (wie vom Client empfangen)</summary>
+<details><summary>Raw message (as received from the client)</summary>
   <pre class="body">{{ raw_text }}</pre>
 </details>
 {% endif %}
 
-<h2>Kommunikation: Client → MTA-Relay</h2>
+<h2>Conversation: client → MTA-Relay</h2>
 {% if inbound %}
 <p class="meta">{{ session_head(inbound) }}</p>
 {{ transcript(inbound) }}
 {% else %}
-<p class="muted">Keine eingehende SMTP-Sitzung (Testmail oder Benachrichtigung aus MTA-Relay).</p>
+<p class="muted">No inbound SMTP session (test message or notification generated by MTA-Relay).</p>
 {% endif %}
 
-<h2 id="outbound">Kommunikation: MTA-Relay → Relay-Server</h2>
+<h2 id="outbound">Conversation: MTA-Relay → relay server</h2>
 {% for s in outbound %}
 <p class="meta">{{ session_head(s) }}</p>
 {{ transcript(s) }}
 {% else %}
-<p class="muted">Keine Weiterleitung erfolgt.</p>
+<p class="muted">Not relayed yet.</p>
 {% endfor %}
 {% endblock %}

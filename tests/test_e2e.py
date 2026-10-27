@@ -112,7 +112,7 @@ def test_relay_success(env):
     outbound = [l["line"] for l in env.db.transcript(sessions["outbound"]["id"])]
     assert any(l.lower().startswith("ehlo nas.home.lan") for l in inbound)
     assert any(l.lower().startswith("mail from:<nas@intern.lan>") for l in inbound)
-    assert any("Nachrichteninhalt" in l for l in inbound)
+    assert any("message content" in l for l in inbound)
     assert any(l.startswith("250 2.0.0 Ok: relayed as #1") for l in inbound)
     assert any(l.lower().startswith("mail from:<relay@example.de>") for l in outbound)
     assert any("queued as ABC123" in l for l in outbound)
@@ -139,7 +139,7 @@ def test_permanent_rejection_is_returned_and_notified(env):
     note = env.db.query_one("SELECT * FROM messages WHERE is_notification = 1")
     assert note["status"] == "queued"
     assert json.loads(note["rcpt_to"]) == ["admin@example.de"]
-    assert note["subject"] == "Unzustellbar: Backup ok"
+    assert note["subject"] == "Undeliverable: Backup ok"
 
 
 def test_network_rejected(env):
@@ -147,7 +147,7 @@ def test_network_rejected(env):
     with pytest.raises(smtplib.SMTPConnectError):
         smtplib.SMTP("127.0.0.1", env.port)
     s = env.db.query_one("SELECT * FROM sessions")
-    assert s["result"] == "abgelehnt: Netz"
+    assert s["result"] == "rejected: network"
 
 
 def test_relay_down_queues_and_retries(env):
@@ -168,7 +168,8 @@ def test_relay_down_queues_and_retries(env):
     assert len(env.upstream.messages) == 1
     assert len(env.db.query("SELECT * FROM sessions WHERE message_id = 1")) == 2
     inbound = [l["line"] for l in env.db.transcript(m["session_id"])]
-    assert any(l.startswith("250 2.0.0 Ok: queued as #1") for l in inbound)
+    reply = next(l for l in inbound if l.startswith("250 2.0.0 Ok: queued as #1"))
+    assert "?" not in reply and " - next attempt" in reply
 
 
 def test_retry_intervals_grow(env):
@@ -212,7 +213,7 @@ def test_queue_lifetime_exceeded(env):
     env.run(env.queue.process_due())
     m = env.message()
     assert m["status"] == "failed"
-    assert "Verweildauer" in m["failed_rcpts"]
+    assert "lifetime" in m["failed_rcpts"]
     notes = env.db.query("SELECT * FROM messages WHERE is_notification = 1")
     assert len(notes) == 1  # no notification about the (also failing) notification
     assert notes[0]["status"] == "queued"
@@ -261,7 +262,7 @@ def test_web_ui(env):
     assert "Backup ok" in client.get("/").text
     page = client.get("/messages/1").text
     assert "from:&lt;nas@intern.lan&gt;" in page and "queued as ABC123" in page
-    assert "Jetzt zustellen" in client.get("/messages/2").text
+    assert "Deliver now" in client.get("/messages/2").text
     assert 'class="count">1<' in client.get("/queue").text
 
     r = client.post("/queue/pause", data={"paused": "1"}, follow_redirects=False)
@@ -292,5 +293,5 @@ def test_web_remove_from_queue(env):
     r = client.post("/queue/1/remove", follow_redirects=False)
     assert r.status_code == 303
     m = env.message()
-    assert m["status"] == "failed" and "Manuell" in m["failed_rcpts"]
+    assert m["status"] == "failed" and "Manually" in m["failed_rcpts"]
     assert client.post("/queue/deliver-all", follow_redirects=False).status_code == 303

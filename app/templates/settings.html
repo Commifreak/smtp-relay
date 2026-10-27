@@ -1,90 +1,90 @@
 {% extends "base.html" %}
-{% block title %}Einstellungen{% endblock %}
+{% block title %}Settings{% endblock %}
 {% block content %}
-<h1>Einstellungen</h1>
-{% if saved %}<div class="alert ok">Einstellungen gespeichert und sofort aktiv.</div>{% endif %}
+<h1>Settings</h1>
+{% if saved %}<div class="alert ok">Settings saved and active immediately.</div>{% endif %}
 {% for e in errors %}<div class="alert err">{{ e }}</div>{% endfor %}
 <form method="post" class="settings">
 <fieldset>
-  <legend>Annahme (lokales Netz)</legend>
-  <label>Erlaubte Absender <small>eine Adresse pro Zeile · <code>dienst@example.de</code>, <code>@example.de</code> (ganze Domain) oder <code>*</code> (alle)</small>
+  <legend>Accepting mail (local network)</legend>
+  <label>Allowed senders <small>one per line · <code>service@example.com</code>, <code>@example.com</code> (whole domain) or <code>*</code> (anyone)</small>
     <textarea name="allowed_senders" rows="6">{{ s.allowed_senders|join('\n') }}</textarea></label>
-  <label>Erlaubte Client-Netze <small>CIDR, eine pro Zeile – Verbindungen von anderen IPs werden sofort abgewiesen</small>
+  <label>Allowed client networks <small>CIDR, one per line – connections from other IPs are refused right away</small>
     <textarea name="allowed_networks" rows="5">{{ s.allowed_networks|join('\n') }}</textarea></label>
-  <label>Erlaubte Empfänger <small>optional; leer = alle Empfänger erlaubt</small>
+  <label>Allowed recipients <small>optional; empty = any recipient</small>
     <textarea name="allowed_recipients" rows="3">{{ s.allowed_recipients|join('\n') }}</textarea></label>
   <div class="row">
-    <label>Hostname (SMTP-Banner / EHLO)<input name="smtp_hostname" value="{{ s.smtp_hostname }}"></label>
-    <label>Max. Nachrichtengröße (MB, 0 = unbegrenzt)<input type="number" min="0" name="max_message_size_mb" value="{{ s.max_message_size_mb }}"></label>
+    <label>Hostname (SMTP banner / EHLO)<input name="smtp_hostname" value="{{ s.smtp_hostname }}"></label>
+    <label>Max. message size (MB, 0 = unlimited)<input type="number" min="0" name="max_message_size_mb" value="{{ s.max_message_size_mb }}"></label>
   </div>
 </fieldset>
 
 <fieldset>
-  <legend>Relay-Server (Upstream)</legend>
+  <legend>Relay server (upstream)</legend>
   <div class="row">
     <label>Host<input name="relay_host" value="{{ s.relay_host }}"></label>
     <label>Port<input type="number" name="relay_port" value="{{ s.relay_port }}"></label>
-    <label>Verschlüsselung
+    <label>Encryption
       <select name="relay_security">
-        <option value="ssl" {{ 'selected' if s.relay_security == 'ssl' }}>SSL/TLS (implizit, meist Port 465)</option>
-        <option value="starttls" {{ 'selected' if s.relay_security == 'starttls' }}>STARTTLS (meist Port 587)</option>
-        <option value="none" {{ 'selected' if s.relay_security == 'none' }}>Keine (unverschlüsselt)</option>
+        <option value="ssl" {{ 'selected' if s.relay_security == 'ssl' }}>SSL/TLS (implicit, usually port 465)</option>
+        <option value="starttls" {{ 'selected' if s.relay_security == 'starttls' }}>STARTTLS (usually port 587)</option>
+        <option value="none" {{ 'selected' if s.relay_security == 'none' }}>None (unencrypted)</option>
       </select></label>
   </div>
   <div class="row">
-    <label>Benutzername<input name="relay_username" value="{{ s.relay_username }}" autocomplete="off"></label>
-    <label>Passwort <small>{{ 'gespeichert – leer lassen, um es zu behalten' if s.relay_password else 'nicht gesetzt' }}</small>
+    <label>Username<input name="relay_username" value="{{ s.relay_username }}" autocomplete="off"></label>
+    <label>Password <small>{{ 'stored – leave empty to keep it' if s.relay_password else 'not set' }}</small>
       <input type="password" name="relay_password" value="" autocomplete="new-password"></label>
     <label>Timeout (s)<input type="number" min="1" name="relay_timeout" value="{{ s.relay_timeout }}"></label>
   </div>
-  <label class="check"><input type="checkbox" name="relay_tls_verify" {{ 'checked' if s.relay_tls_verify }}> TLS-Zertifikat des Relays prüfen</label>
-  {% if s.relay_password %}<label class="check"><input type="checkbox" name="clear_password"> Gespeichertes Passwort löschen</label>{% endif %}
+  <label class="check"><input type="checkbox" name="relay_tls_verify" {{ 'checked' if s.relay_tls_verify }}> Verify the relay's TLS certificate</label>
+  {% if s.relay_password %}<label class="check"><input type="checkbox" name="clear_password"> Delete stored password</label>{% endif %}
 </fieldset>
 
 <fieldset>
-  <legend>Absender umschreiben</legend>
-  <p class="hint">mailbox.org nimmt nur Absenderadressen an, die zu deinem Konto gehören (Hauptadresse, Alias oder eigene Domain). Interne Dienste mit anderen Absendern lassen sich damit trotzdem zustellen.</p>
-  <label class="check"><input type="checkbox" name="rewrite_enabled" {{ 'checked' if s.rewrite_enabled }}> From-Header umschreiben</label>
+  <legend>Sender rewriting</legend>
+  <p class="hint">mailbox.org only accepts sender addresses that belong to your account (primary address, alias or own domain). Rewriting lets internal services with other sender addresses deliver anyway.</p>
+  <label class="check"><input type="checkbox" name="rewrite_enabled" {{ 'checked' if s.rewrite_enabled }}> Rewrite the From header</label>
   <div class="row">
-    <label>Neue Absenderadresse<input name="rewrite_from_address" value="{{ s.rewrite_from_address }}" placeholder="relay@deinedomain.de"></label>
-    <label>Anzeigename
+    <label>New sender address<input name="rewrite_from_address" value="{{ s.rewrite_from_address }}" placeholder="relay@yourdomain.com"></label>
+    <label>Display name
       <select name="rewrite_name_mode">
-        <option value="keep" {{ 'selected' if s.rewrite_name_mode == 'keep' }}>Original-Anzeigename übernehmen</option>
-        <option value="address" {{ 'selected' if s.rewrite_name_mode == 'address' }}>Originaladresse als Anzeigename</option>
-        <option value="fixed" {{ 'selected' if s.rewrite_name_mode == 'fixed' }}>Fester Name</option>
-        <option value="none" {{ 'selected' if s.rewrite_name_mode == 'none' }}>Kein Anzeigename</option>
+        <option value="keep" {{ 'selected' if s.rewrite_name_mode == 'keep' }}>Keep original display name</option>
+        <option value="address" {{ 'selected' if s.rewrite_name_mode == 'address' }}>Original address as display name</option>
+        <option value="fixed" {{ 'selected' if s.rewrite_name_mode == 'fixed' }}>Fixed name</option>
+        <option value="none" {{ 'selected' if s.rewrite_name_mode == 'none' }}>No display name</option>
       </select></label>
-    <label>Fester Name<input name="rewrite_fixed_name" value="{{ s.rewrite_fixed_name }}" placeholder="Heimnetz"></label>
+    <label>Fixed name<input name="rewrite_fixed_name" value="{{ s.rewrite_fixed_name }}" placeholder="Home network"></label>
   </div>
-  <label class="check"><input type="checkbox" name="rewrite_envelope" {{ 'checked' if s.rewrite_envelope }}> Auch Envelope-Absender (MAIL FROM) umschreiben</label>
-  <label class="check"><input type="checkbox" name="rewrite_set_reply_to" {{ 'checked' if s.rewrite_set_reply_to }}> Originaladresse als Reply-To setzen (falls nicht vorhanden)</label>
-  <p class="hint">Der ursprüngliche From-Header bleibt immer als <code>X-Original-From</code> erhalten.</p>
+  <label class="check"><input type="checkbox" name="rewrite_envelope" {{ 'checked' if s.rewrite_envelope }}> Also rewrite the envelope sender (MAIL FROM)</label>
+  <label class="check"><input type="checkbox" name="rewrite_set_reply_to" {{ 'checked' if s.rewrite_set_reply_to }}> Set the original address as Reply-To (if not present)</label>
+  <p class="hint">The original From header is always kept as <code>X-Original-From</code>.</p>
 </fieldset>
 
 <fieldset>
-  <legend>Warteschlange</legend>
-  <p class="hint">Jede Mail wird zuerst gespeichert und sofort zugestellt. Lehnt das Relay endgültig ab (5xx), bekommt der Client den Fehler direkt zurück. Bei temporären Fehlern (Relay nicht erreichbar, 4xx) wird die Mail angenommen und automatisch erneut zugestellt.</p>
+  <legend>Queue</legend>
+  <p class="hint">Every message is stored first and delivered immediately. If the relay rejects it permanently (5xx), the client receives the error directly. On temporary failures (relay unreachable, 4xx) the message is accepted and retried automatically.</p>
   <div class="row">
-    <label>Wiederholungsabstände (Minuten) <small>kommagetrennt; der letzte Wert wiederholt sich</small><input name="retry_intervals" value="{{ s.retry_intervals }}"></label>
-    <label>Maximale Verweildauer (Stunden) <small>danach wird die Zustellung aufgegeben</small><input type="number" min="1" name="queue_max_age_hours" value="{{ s.queue_max_age_hours }}"></label>
-    <label>Benachrichtigung an <small>bei endgültig gescheiterter Zustellung; leer = keine</small><input name="notify_address" value="{{ s.notify_address }}" placeholder="admin@example.de"></label>
+    <label>Retry intervals (minutes) <small>comma-separated; the last value repeats</small><input name="retry_intervals" value="{{ s.retry_intervals }}"></label>
+    <label>Maximum queue lifetime (hours) <small>delivery is given up afterwards</small><input type="number" min="1" name="queue_max_age_hours" value="{{ s.queue_max_age_hours }}"></label>
+    <label>Failure notifications to <small>when delivery finally fails; empty = none</small><input name="notify_address" value="{{ s.notify_address }}" placeholder="admin@example.com"></label>
   </div>
 </fieldset>
 
 <fieldset>
-  <legend>Header & Historie</legend>
-  <label class="check"><input type="checkbox" name="add_received_header" {{ 'checked' if s.add_received_header }}> Received-Header hinzufügen (Nachverfolgbarkeit)</label>
-  <label class="check"><input type="checkbox" name="add_missing_headers" {{ 'checked' if s.add_missing_headers }}> Fehlende Date-/Message-ID-Header ergänzen</label>
-  <label class="check"><input type="checkbox" name="store_content" {{ 'checked' if s.store_content }}> Mail-Inhalte dauerhaft speichern (für Anzeige und „Erneut senden“; sonst nur bis zum Abschluss der Zustellung)</label>
-  <div class="row"><label>Aufbewahrung (Tage, 0 = unbegrenzt)<input type="number" min="0" name="retention_days" value="{{ s.retention_days }}"></label></div>
+  <legend>Headers & history</legend>
+  <label class="check"><input type="checkbox" name="add_received_header" {{ 'checked' if s.add_received_header }}> Add a Received header (traceability)</label>
+  <label class="check"><input type="checkbox" name="add_missing_headers" {{ 'checked' if s.add_missing_headers }}> Add missing Date / Message-ID headers</label>
+  <label class="check"><input type="checkbox" name="store_content" {{ 'checked' if s.store_content }}> Keep message content (for viewing and “Resend”; otherwise only until delivery is finished)</label>
+  <div class="row"><label>Retention (days, 0 = forever)<input type="number" min="0" name="retention_days" value="{{ s.retention_days }}"></label></div>
 </fieldset>
-<button class="primary">Speichern</button>
+<button class="primary">Save</button>
 </form>
 
 <fieldset class="danger">
-  <legend>Wartung</legend>
-  <form method="post" action="/settings/clear-history" onsubmit="return confirm('Gesamte Historie inkl. aller Protokolle löschen?')">
-    <button class="danger">Gesamte Historie löschen</button>
+  <legend>Maintenance</legend>
+  <form method="post" action="/settings/clear-history" onsubmit="return confirm('Delete the entire history including all transcripts? Queued messages are kept.')">
+    <button class="danger">Clear history</button>
   </form>
 </fieldset>
 {% endblock %}

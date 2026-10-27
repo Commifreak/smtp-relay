@@ -19,7 +19,7 @@ class _TranscriptMixin:
         if t is not None:
             text = s.decode("utf-8", "replace") if isinstance(s, bytes) else s
             if self._sending_data and text.lower() != "data\r\n":
-                t.client(f"[Nachrichteninhalt: {len(s)} Bytes]")
+                t.client(f"[message content: {len(s)} bytes]")
                 t.client(".")
             else:
                 for line in text.rstrip("\r\n").split("\r\n"):
@@ -31,10 +31,10 @@ class _TranscriptMixin:
         if parts[0].upper() == "AUTH":
             self._auth_pending = True
             if len(parts) > 2:
-                return f"{parts[0]} {parts[1]} ******** (maskiert)"
+                return f"{parts[0]} {parts[1]} ******** (masked)"
             return line
         if self._auth_pending:
-            return "******** (maskiert)"
+            return "******** (masked)"
         return line
 
     def getreply(self):
@@ -71,12 +71,12 @@ def _tls_info(sock) -> str:
         cert = sock.getpeercert() or {}
         subject = dict(x[0] for x in cert.get("subject", ()))
         issuer = dict(x[0] for x in cert.get("issuer", ()))
-        info = f"TLS aktiv: {sock.version()}, Cipher {cipher[0]}"
+        info = f"TLS active: {sock.version()}, cipher {cipher[0]}"
         if subject:
-            info += f", Zertifikat CN={subject.get('commonName')} (Aussteller: {issuer.get('organizationName') or issuer.get('commonName')})"
+            info += f", certificate CN={subject.get('commonName')} (issuer: {issuer.get('organizationName') or issuer.get('commonName')})"
         return info
     except Exception:
-        return "TLS aktiv"
+        return "TLS active"
 
 
 def _connect(settings: dict, t: Transcript):
@@ -85,9 +85,9 @@ def _connect(settings: dict, t: Transcript):
     if not settings.get("relay_tls_verify", True):
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        t.info("Achtung: TLS-Zertifikatsprüfung ist deaktiviert")
+        t.info("Warning: TLS certificate verification is disabled")
     kwargs = {"local_hostname": settings["smtp_hostname"], "timeout": settings.get("relay_timeout") or 30}
-    t.info(f"Verbinde zu {host}:{port} (Modus: {security})")
+    t.info(f"Connecting to {host}:{port} (mode: {security})")
     if security == "ssl":
         s = LoggingSMTP_SSL(context=ctx, **kwargs)
     else:
@@ -96,7 +96,7 @@ def _connect(settings: dict, t: Transcript):
     s.connect(host, port)
     peer = s.sock.getpeername() if s.sock else None
     if peer:
-        t.info(f"TCP-Verbindung hergestellt zu {peer[0]}:{peer[1]}")
+        t.info(f"TCP connection established to {peer[0]}:{peer[1]}")
     if security == "ssl":
         t.info(_tls_info(s.sock))
     s.ehlo()
@@ -106,7 +106,7 @@ def _connect(settings: dict, t: Transcript):
         s.ehlo()
     if settings.get("relay_username"):
         s.login(settings["relay_username"], settings.get("relay_password", ""))
-        t.info("Authentifizierung erfolgreich")
+        t.info("Authentication successful")
     return s
 
 
@@ -115,7 +115,7 @@ def _quit(s, t: Transcript) -> None:
         s.quit()
     except Exception:
         s.close()
-    t.info("Verbindung geschlossen")
+    t.info("Connection closed")
 
 
 def send_sync(settings: dict, envelope_from: str, rcpts: list[str], data: bytes,
@@ -153,10 +153,10 @@ async def test_connection(db: Database, settings: dict) -> tuple[int, bool, str]
     t = Transcript(db, session_id)
     try:
         await asyncio.to_thread(test_connection_sync, settings, t)
-        ok, detail = True, "Verbindung und Anmeldung erfolgreich"
+        ok, detail = True, "Connection and login successful"
         t.info(detail)
     except Exception as e:
         ok, detail = False, f"{type(e).__name__}: {e}"
         t.error(detail)
-    db.end_session(session_id, "ok" if ok else "fehler")
+    db.end_session(session_id, "ok" if ok else "error")
     return session_id, ok, detail

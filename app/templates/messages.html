@@ -1,22 +1,22 @@
 {% extends "base.html" %}
 {% from "_macros.html" import badge %}
-{% block title %}Mail-Historie{% endblock %}
+{% block title %}Mail history{% endblock %}
 {% block content %}
-{% if no_senders %}<div class="alert warn">Es sind keine erlaubten Absender konfiguriert – alle Mails werden abgelehnt. <a href="/settings">Einstellungen öffnen</a></div>{% endif %}
+{% if no_senders %}<div class="alert warn">No allowed senders are configured – all mail is rejected. <a href="/settings">Open settings</a></div>{% endif %}
 <div class="stats">
-  <span class="muted">Letzte 24 h:</span>
-  {% for st in statuses if stats.get(st) %}<a href="/?{{ qs(status=st, page=1) }}">{{ badge(st) }} {{ stats[st] }}</a>{% else %}<span class="muted">keine Mails</span>{% endfor %}
+  <span class="muted">Last 24 h:</span>
+  {% for st in statuses if stats.get(st) %}<a href="/?{{ qs(status=st, page=1) }}">{{ badge(st) }} {{ stats[st] }}</a>{% else %}<span class="muted">no mail</span>{% endfor %}
 </div>
 <form class="filters" method="get">
-  <input type="search" name="q" value="{{ q }}" placeholder="Suche: Absender, Empfänger, Betreff, Host …">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search: sender, recipient, subject, host …">
   <select name="status">
-    <option value="">Alle Status</option>
+    <option value="">All statuses</option>
     {% for st in statuses %}<option value="{{ st }}" {{ 'selected' if st == status }}>{{ STATUS_LABELS[st] }}</option>{% endfor %}
   </select>
-  <button>Filtern</button>
+  <button>Filter</button>
 </form>
 <table class="list">
-<thead><tr><th>#</th><th>Zeit</th><th>Client</th><th>Absender</th><th>Empfänger</th><th>Betreff</th><th>Größe</th><th>Status</th></tr></thead>
+<thead><tr><th>#</th><th>Time</th><th>Client</th><th>Sender</th><th>Recipients</th><th>Subject</th><th>Size</th><th>Status</th></tr></thead>
 <tbody>
 {% for m in rows %}
 <tr class="clickable" data-href="/messages/{{ m.id }}">
@@ -30,12 +30,12 @@
   <td>{{ badge(m.status) }}{% if m.status in ('failed', 'deferred', 'rejected', 'partial', 'queued') and m.detail %}<div class="sub err">{{ m.detail|truncate(90) }}</div>{% endif %}</td>
 </tr>
 {% else %}
-<tr><td colspan="8" class="muted center">Keine Nachrichten gefunden.</td></tr>
+<tr><td colspan="8" class="muted center">No messages found.</td></tr>
 {% endfor %}
 </tbody>
 </table>
 <div class="pager">
-  {% if page > 1 %}<a href="/?{{ qs(page=page-1) }}">← Neuer</a>{% endif %}
-  {% if has_next %}<a href="/?{{ qs(page=page+1) }}">Älter →</a>{% endif %}
+  {% if page > 1 %}<a href="/?{{ qs(page=page-1) }}">← Newer</a>{% endif %}
+  {% if has_next %}<a href="/?{{ qs(page=page+1) }}">Older →</a>{% endif %}
 </div>
 {% endblock %}

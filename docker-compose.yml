@@ -6,8 +6,8 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "25:2525"     # SMTP aus dem lokalen Netz
-      - "8080:8080"   # WebUI
+      - "25:2525"     # SMTP from the local network
+      - "8080:8080"   # web UI
     volumes:
       - mta-relay-data:/data
 

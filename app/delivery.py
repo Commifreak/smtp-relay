@@ -26,12 +26,17 @@ FINAL = ("relayed", "partial", "failed")
 BATCH = 20
 
 
+ASCII_REPLACEMENTS = str.maketrans({"–": "-", "—": "-", "→": "->", "…": "...", "„": '"', "“": '"', "”": '"'})
+
+
 def _ascii(text: str) -> str:
+    """SMTP replies must be ASCII: map common typography, replace anything else."""
+    text = text.translate(ASCII_REPLACEMENTS)
     return " ".join(text.encode("ascii", "replace").decode().split())
 
 
 def _fmt_time(ts: float) -> str:
-    return datetime.fromtimestamp(ts).strftime("%d.%m. %H:%M:%S")
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
 
 
 @dataclass
@@ -89,7 +94,7 @@ class DeliveryQueue:
         row = self.db.query_one("SELECT * FROM messages WHERE id = ?", (message_id,))
         if not row or row["status"] != "queued":
             return False
-        reason = "Manuell aus der Warteschlange entfernt"
+        reason = "Manually removed from the queue"
         failed = json.loads(row["failed_rcpts"] or "[]") + \
             [f"{r}: {reason}" for r in json.loads(row["pending_rcpts"] or "[]")]
         fields = {"status": "partial" if json.loads(row["delivered_rcpts"] or "[]") else "failed",
@@ -116,7 +121,7 @@ class DeliveryQueue:
             "WHERE status IN ('relaying', 'received') AND raw IS NOT NULL AND pending_rcpts IS NOT NULL",
             (time.time(),))
         if cur.rowcount:
-            log.info("%d unterbrochene Zustellung(en) wieder in die Warteschlange gestellt", cur.rowcount)
+            log.info("Requeued %d interrupted delivery attempt(s)", cur.rowcount)
 
     async def process_due(self) -> int:
         done = 0
@@ -146,7 +151,7 @@ class DeliveryQueue:
             try:
                 await self.process_due()
             except Exception:
-                log.exception("Fehler bei der Verarbeitung der Warteschlange")
+                log.exception("Error while processing the queue")
             try:
                 await asyncio.wait_for(self._wake.wait(), self._seconds_until_next())
             except TimeoutError:
@@ -172,7 +177,7 @@ class DeliveryQueue:
         session_id = self.db.create_session(
             "outbound", peer=f"{settings['relay_host']}:{settings['relay_port']}", message_id=message_id)
         t = Transcript(self.db, session_id)
-        t.info(f"Zustellversuch {attempt_no} an {len(pending)} Empfänger: {', '.join(pending)}")
+        t.info(f"Delivery attempt {attempt_no} for {len(pending)} recipient(s): {', '.join(pending)}")
         for note in notes:
             t.info(note)
         self.db.update_message(message_id, relay_from=envelope_from)
@@ -187,7 +192,7 @@ class DeliveryQueue:
             for rcpt, (code, msg) in refused.items():
                 (temp if 400 <= code < 500 else perm)[rcpt] = (code, reply_text(code, msg))
         except smtplib.SMTPRecipientsRefused as e:
-            upstream = "Alle Empfänger abgelehnt"
+            upstream = "All recipients refused"
             for rcpt, (code, msg) in e.recipients.items():
                 (temp if 400 <= code < 500 else perm)[rcpt] = (code, reply_text(code, msg))
         except smtplib.SMTPResponseException as e:
@@ -202,9 +207,9 @@ class DeliveryQueue:
 
         accepted = [r for r in pending if r not in temp and r not in perm]
         if accepted:
-            t.info(f"Vom Relay angenommen für: {', '.join(accepted)}")
+            t.info(f"Accepted by relay for: {', '.join(accepted)}")
         for rcpt, (_, why) in perm.items():
-            t.error(f"Endgültig abgelehnt: {rcpt} – {why}")
+            t.error(f"Permanently rejected: {rcpt} – {why}")
         delivered += accepted
         failed += [f"{r}: {why}" for r, (_, why) in perm.items()]
         pending = list(temp)
@@ -219,17 +224,17 @@ class DeliveryQueue:
                 delay = intervals[min(attempt_no - 1, len(intervals) - 1)]
                 next_at = now + delay * 60
                 status = "queued"
-                detail = f"Temporärer Fehler: {first_error} – nächster Versuch {_fmt_time(next_at)}"
-                t.error(f"Temporär fehlgeschlagen für {', '.join(pending)} – nächster Versuch in {delay} min "
+                detail = f"Temporary failure: {first_error} – next attempt {_fmt_time(next_at)}"
+                t.error(f"Temporary failure for {', '.join(pending)} – next attempt in {delay} min "
                         f"({_fmt_time(next_at)})")
             else:
-                reason = f"Maximale Verweildauer von {settings['queue_max_age_hours']} h überschritten"
-                t.error(f"{reason} – Zustellung aufgegeben")
-                failed += [f"{r}: {reason} (letzter Fehler: {temp[r][1]})" for r in pending]
+                reason = f"Maximum queue lifetime of {settings['queue_max_age_hours']} h exceeded"
+                t.error(f"{reason} – giving up")
+                failed += [f"{r}: {reason} (last error: {temp[r][1]})" for r in pending]
                 pending = []
         if status is None:
             if delivered and failed:
-                status, detail = "partial", f"{upstream}; fehlgeschlagen: {'; '.join(failed)}"
+                status, detail = "partial", f"{upstream}; failed: {'; '.join(failed)}"
             elif delivered:
                 status, detail = "relayed", upstream
             else:
@@ -258,7 +263,7 @@ class DeliveryQueue:
         m = EmailMessage()
         m["From"] = f"MTA-Relay <{sender}>"
         m["To"] = to
-        m["Subject"] = f"Unzustellbar: {row['subject'] or '(kein Betreff)'}"
+        m["Subject"] = f"Undeliverable: {row['subject'] or '(no subject)'}"
         m["Date"] = formatdate(localtime=True)
         m["Message-ID"] = make_msgid(domain=sender.rsplit("@", 1)[-1])
         m["Auto-Submitted"] = "auto-generated"
@@ -266,27 +271,27 @@ class DeliveryQueue:
         if row["client_name"]:
             client += f" ({row['client_name']})"
         lines = [
-            "MTA-Relay konnte die folgende Nachricht nicht (vollständig) zustellen.",
+            "MTA-Relay could not (fully) deliver the following message.",
             "",
-            f"Nachricht:   #{row['id']}",
-            f"Empfangen:   {_fmt_time(row['received_at'])}",
+            f"Message:     #{row['id']}",
+            f"Received:    {_fmt_time(row['received_at'])}",
             f"Client:      {client}",
-            f"Absender:    {row['mail_from']}",
-            f"Empfänger:   {', '.join(json.loads(row['rcpt_to'] or '[]'))}",
-            f"Betreff:     {row['subject'] or ''}",
-            f"Versuche:    {attempts}",
+            f"Sender:      {row['mail_from']}",
+            f"Recipients:  {', '.join(json.loads(row['rcpt_to'] or '[]'))}",
+            f"Subject:     {row['subject'] or ''}",
+            f"Attempts:    {attempts}",
             "",
-            "Fehlgeschlagene Empfänger:",
+            "Failed recipients:",
             *[f"  - {f}" for f in failed],
             "",
-            "Die vollständigen SMTP-Protokolle findest du im WebUI unter der Nachrichtennummer.",
+            "The full SMTP transcripts are available in the web UI under the message number.",
         ]
         m.set_content("\n".join(lines))
         if row["raw"]:
             fields, _ = split_message(row["raw"])
             m.add_attachment(b"".join(fields), maintype="text", subtype="rfc822-headers",
-                             filename="original-header.txt")
+                             filename="original-headers.txt")
         raw = m.as_bytes(policy=m.policy.clone(linesep="\r\n"))
         self.accept(raw=raw, mail_from=sender, rcpts=[to], status="queued", client_ip="MTA-Relay",
-                    client_name="Benachrichtigung", is_notification=1)
+                    client_name="Notification", is_notification=1)
         self.wake()

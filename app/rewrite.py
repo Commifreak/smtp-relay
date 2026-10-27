@@ -82,7 +82,7 @@ def message_parts(raw: bytes) -> dict:
             result["html"] = html.get_content()
         for part in msg.iter_attachments():
             payload = part.get_payload(decode=True) or b""
-            result["attachments"].append((part.get_filename() or "(ohne Namen)",
+            result["attachments"].append((part.get_filename() or "(unnamed)",
                                           part.get_content_type(), len(payload)))
     except Exception as exc:  # malformed messages must not break the UI
         result["error"] = str(exc)
@@ -131,20 +131,20 @@ def prepare(raw: bytes, mail_from: str, settings: dict, trace: dict | None = Non
         else:
             fields.append(_fmt("From", new_from))
         fields.extend(extra)
-        notes.append(f"From umgeschrieben: {decode_value(orig_raw) if orig_raw else '(fehlte)'} → {new_from}")
+        notes.append(f"From rewritten: {decode_value(orig_raw) if orig_raw else '(missing)'} → {new_from}")
         if settings.get("rewrite_envelope"):
             envelope_from = new_addr
             if new_addr != mail_from:
-                notes.append(f"Envelope-Absender umgeschrieben: {mail_from} → {new_addr}")
+                notes.append(f"Envelope sender rewritten: {mail_from} → {new_addr}")
 
     if settings.get("add_missing_headers"):
         if "date" not in names:
             fields.append(_fmt("Date", formatdate(localtime=True)))
-            notes.append("Fehlender Date-Header ergänzt")
+            notes.append("Added missing Date header")
         if "message-id" not in names:
             domain = envelope_from.rsplit("@", 1)[-1] if "@" in envelope_from else settings.get("smtp_hostname")
             fields.append(_fmt("Message-ID", make_msgid(domain=domain)))
-            notes.append("Fehlende Message-ID ergänzt")
+            notes.append("Added missing Message-ID header")
 
     if settings.get("add_received_header") and trace:
         received = (f"Received: from {trace.get('helo') or 'unknown'} "
