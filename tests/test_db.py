@@ -41,8 +41,8 @@ def test_migrates_old_database_with_report(tmp_path):
     assert set(QUEUE_COLUMNS) | set(RELAY_COLUMNS) <= columns
     row = db.query_one("SELECT * FROM messages")
     assert row["status"] == "deferred" and row["attempts"] == 0
-    assert db.query_one("SELECT name, senders FROM relays") == {"name": "smtp.mailbox.org",
-                                                                "senders": '["nas@example.com"]'}
+    assert db.query_one("SELECT name, senders, port, security FROM relays") == {
+        "name": "smtp.mailbox.org", "senders": '["nas@example.com"]', "port": 465, "security": "ssl"}
 
     lines.clear()
     assert migrate(Database(path), str(tmp_path), out=lines.append) == 0  # next start: nothing pending, no block

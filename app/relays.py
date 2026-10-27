@@ -12,8 +12,9 @@ BOOL_FIELDS = ("enabled", "tls_verify", "rewrite_enabled", "rewrite_set_reply_to
 FIELDS = ("name", "enabled", "senders", "host", "port", "security", "tls_verify", "username", "password",
           "rewrite_enabled", "rewrite_from_address", "rewrite_name_mode", "rewrite_fixed_name",
           "rewrite_set_reply_to", "rewrite_envelope")
-NEW_RELAY = {"name": "", "enabled": True, "senders": [], "host": "smtp.mailbox.org", "port": 465,
-             "security": "ssl", "tls_verify": True, "username": "", "password": "", "rewrite_enabled": False,
+# A new relay starts without server details; they have to be entered explicitly.
+NEW_RELAY = {"name": "", "enabled": True, "senders": [], "host": "", "port": "",
+             "security": "", "tls_verify": True, "username": "", "password": "", "rewrite_enabled": False,
              "rewrite_from_address": "", "rewrite_name_mode": "keep", "rewrite_fixed_name": "",
              "rewrite_set_reply_to": True, "rewrite_envelope": True}
 
@@ -105,7 +106,7 @@ class Relays:
         except (TypeError, ValueError):
             errors.append("Port must be between 1 and 65535")
         if clean["security"] not in SECURITY_MODES:
-            errors.append("Invalid encryption mode")
+            errors.append("Choose an encryption mode")
         if clean["rewrite_name_mode"] not in NAME_MODES:
             errors.append("Invalid display name mode")
         if clean["rewrite_enabled"] and not ADDRESS_RE.match(clean["rewrite_from_address"]):
@@ -146,8 +147,9 @@ class Relays:
         stored = self.db.load_settings()
         if self.db.query_one("SELECT id FROM relays LIMIT 1") or not stored.get("relay_host"):
             return False
+        # 465/ssl were the defaults of releases before 1.3
         relay = {**NEW_RELAY, "name": stored["relay_host"], "senders": stored.get("allowed_senders", []),
-                 "host": stored["relay_host"]}
+                 "host": stored["relay_host"], "port": 465, "security": "ssl"}
         legacy = {"port": "relay_port", "security": "relay_security", "tls_verify": "relay_tls_verify",
                   "username": "relay_username", "password": "relay_password"}
         for field, key in legacy.items():

@@ -35,10 +35,11 @@
       <label>Name <small>optional, defaults to the host</small><input name="name" value="{{ r.name }}" placeholder="mailbox.org"></label>
     </div>
     <div class="row">
-      <label>Host<input name="host" value="{{ r.host }}" required></label>
-      <label>Port<input type="number" name="port" value="{{ r.port }}" required></label>
+      <label>Host<input name="host" value="{{ r.host }}" placeholder="smtp.example.com" required></label>
+      <label>Port<input type="number" name="port" value="{{ r.port }}" placeholder="465 or 587" required></label>
       <label>Encryption
-        <select name="security">
+        <select name="security" required>
+          <option value="" disabled {{ 'selected' if not r.security }}>Choose…</option>
           <option value="ssl" {{ 'selected' if r.security == 'ssl' }}>SSL/TLS (implicit, usually port 465)</option>
           <option value="starttls" {{ 'selected' if r.security == 'starttls' }}>STARTTLS (usually port 587)</option>
           <option value="none" {{ 'selected' if r.security == 'none' }}>None (unencrypted)</option>
