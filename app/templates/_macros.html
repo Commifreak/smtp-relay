@@ -3,7 +3,7 @@
 {%- endmacro %}
 
 {% macro transcript(session) -%}
-{% set labels = {'C': 'client → MTA-Relay', 'S': 'MTA-Relay → client'} if session.kind == 'inbound' else {'C': 'MTA-Relay → upstream', 'S': 'upstream → MTA-Relay'} %}
+{% set labels = {'C': 'client → smtp-relay', 'S': 'smtp-relay → client'} if session.kind == 'inbound' else {'C': 'smtp-relay → upstream', 'S': 'upstream → smtp-relay'} %}
 <div class="transcript">
 {% for l in session.lines %}
 <div class="tl d-{{ l.dir }}"><span class="t">{{ l.ts|ts(true) }}</span><span class="d" title="{{ labels.get(l.dir, '') }}">{% if l.dir == 'C' %}C:{% elif l.dir == 'S' %}S:{% elif l.dir == 'E' %}!!{% else %}--{% endif %}</span><span class="l">{{ l.line }}</span></div>

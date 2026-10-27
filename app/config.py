@@ -1,15 +1,13 @@
-"""Runtime settings: defaults, environment seeding, validation and address matching."""
+"""Runtime settings: defaults, validation and address matching."""
 import ipaddress
-import os
 import re
 import threading
 
 from .db import Database
 
-# Settings editable in the web UI. Environment variables (upper-case key) only seed
-# the initial value; afterwards the value stored in the database wins.
+# Settings editable in the web UI (setup wizard and settings page).
 DEFAULTS: dict = {
-    "smtp_hostname": "mta-relay",
+    "smtp_hostname": "smtp-relay",
     "allowed_networks": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fc00::/7"],
     "allowed_senders": [],
     "allowed_recipients": [],
@@ -35,9 +33,21 @@ DEFAULTS: dict = {
     "queue_max_age_hours": 48,
     "queue_paused": False,
     "notify_address": "",
+    "proxy_auth_enabled": False,
+    "proxy_auth_header": "Remote-User",
+    "proxy_auth_trusted_networks": [],
+    "proxy_auth_logout_url": "",
 }
 
-LIST_KEYS = {"allowed_networks", "allowed_senders", "allowed_recipients"}
+# State managed by the application itself, never taken from settings forms.
+INTERNAL: dict = {
+    "setup_completed": False,
+    "auth_username": "",
+    "auth_password_hash": "",
+    "auth_initial_password": "",  # generated password, kept until the admin sets their own
+}
+
+LIST_KEYS = {"allowed_networks", "allowed_senders", "allowed_recipients", "proxy_auth_trusted_networks"}
 BOOL_KEYS = {k for k, v in DEFAULTS.items() if isinstance(v, bool)}
 INT_KEYS = {k for k, v in DEFAULTS.items() if isinstance(v, int) and not isinstance(v, bool)}
 SECURITY_MODES = ("ssl", "starttls", "none")
@@ -45,17 +55,7 @@ NAME_MODES = ("keep", "address", "fixed", "none")
 
 ADDRESS_RE = re.compile(r"^[^@\s<>]+@[^@\s<>]+$")
 PATTERN_RE = re.compile(r"^(\*|(\*?@|[^@\s<>]+@)[^@\s<>]+)$")
-
-
-def _parse_env(key: str, raw: str):
-    default = DEFAULTS[key]
-    if key in LIST_KEYS:
-        return [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
-    if isinstance(default, bool):
-        return raw.strip().lower() in ("1", "true", "yes", "on")
-    if isinstance(default, int):
-        return int(raw)
-    return raw
+HEADER_RE = re.compile(r"^[A-Za-z0-9-]+$")
 
 
 def split_list(value) -> list[str]:
@@ -84,7 +84,7 @@ def validate(values: dict) -> tuple[dict, list[str]]:
             continue
         clean[key] = value
 
-    for net in clean.get("allowed_networks", []):
+    for net in clean.get("allowed_networks", []) + clean.get("proxy_auth_trusted_networks", []):
         try:
             ipaddress.ip_network(net, strict=False)
         except ValueError:
@@ -112,6 +112,13 @@ def validate(values: dict) -> tuple[dict, list[str]]:
         errors.append("Invalid notification address")
     if "queue_max_age_hours" in clean and clean["queue_max_age_hours"] < 1:
         errors.append("Maximum queue lifetime must be at least 1 hour")
+    if "proxy_auth_header" in clean and not HEADER_RE.match(clean["proxy_auth_header"]):
+        errors.append("Invalid proxy auth header name")
+    if clean.get("proxy_auth_enabled") and not clean.get("proxy_auth_trusted_networks"):
+        errors.append("Proxy authentication needs at least one trusted proxy network")
+    logout = clean.get("proxy_auth_logout_url")
+    if logout and not logout.startswith(("http://", "https://")):
+        errors.append("Logout URL must start with http:// or https://")
     for key in ("retention_days", "max_message_size_mb", "relay_timeout"):
         if key in clean and clean[key] < 0:
             errors.append(f"{key} must not be negative")
@@ -125,14 +132,8 @@ class Settings:
         self.db = db
         self._lock = threading.Lock()
         stored = db.load_settings()
-        data = dict(DEFAULTS)
-        for key in DEFAULTS:
-            if key in stored:
-                data[key] = stored[key]
-            elif key.upper() in os.environ:
-                data[key] = _parse_env(key, os.environ[key.upper()])
-        self._data = data
-        db.save_settings(data)
+        self._data = {**DEFAULTS, **INTERNAL, **{k: v for k, v in stored.items() if k in DEFAULTS or k in INTERNAL}}
+        db.save_settings(self._data)
 
     def get(self, key: str):
         with self._lock:
@@ -141,6 +142,14 @@ class Settings:
     def snapshot(self) -> dict:
         with self._lock:
             return dict(self._data)
+
+    def set_internal(self, **values) -> None:
+        unknown = set(values) - set(INTERNAL)
+        if unknown:
+            raise KeyError(f"Not an internal setting: {', '.join(unknown)}")
+        with self._lock:
+            self._data.update(values)
+        self.db.save_settings(values)
 
     def update(self, values: dict) -> list[str]:
         clean, errors = validate(values)

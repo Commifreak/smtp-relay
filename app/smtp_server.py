@@ -9,7 +9,7 @@ from .config import Settings, address_matches, ip_allowed, normalize_ip
 from .db import Database, Transcript
 from .delivery import DeliveryQueue
 
-log = logging.getLogger("mta-relay.smtp")
+log = logging.getLogger("smtp-relay.smtp")
 
 
 class LoggingSMTP(SMTP):
@@ -188,7 +188,7 @@ def protocol_factory(db: Database, settings: Settings, queue: DeliveryQueue, tls
         size = settings.get("max_message_size_mb")
         return LoggingSMTP(handler, db, settings,
                            hostname=settings.get("smtp_hostname"),
-                           ident="MTA-Relay",
+                           ident="smtp-relay",
                            data_size_limit=size * 1024 * 1024 if size else None,
                            enable_SMTPUTF8=True,
                            tls_context=tls_context,

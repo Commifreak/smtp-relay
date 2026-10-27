@@ -1,7 +1,7 @@
-"""Web UI: mail history, SMTP transcripts, settings and diagnostics."""
+"""Web UI: login, setup wizard, mail history, SMTP transcripts, settings and diagnostics."""
+import asyncio
 import json
-import os
-import secrets
+import logging
 import time
 from datetime import datetime
 from email.message import EmailMessage
@@ -11,16 +11,19 @@ from urllib.parse import urlencode, urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import __version__
-from .config import DEFAULTS, LIST_KEYS, Settings
+from .auth import (MIN_PASSWORD_LENGTH, SESSION_COOKIE, SESSION_LIFETIME, Sessions, check_login, proxy_user,
+                   set_credentials, verify_password)
+from .config import DEFAULTS, LIST_KEYS, Settings, normalize_ip
 from .db import Database
 from .delivery import DeliveryQueue
 from .relay import test_connection
 from .rewrite import message_parts
+
+log = logging.getLogger("smtp-relay.web")
 
 BASE = Path(__file__).parent
 PAGE_SIZE = 100
@@ -30,6 +33,20 @@ STATUS_LABELS = {"relayed": "relayed", "partial": "partial", "queued": "queued",
                  # statuses of the first release, still present in older histories
                  "deferred": "deferred", "received": "received"}
 KIND_LABELS = {"inbound": "Inbound", "outbound": "Relay", "test": "Connection test"}
+SETUP_STEPS = [("account", "Account"), ("relay", "Relay server"), ("senders", "Senders"), ("options", "Options")]
+PROXY_KEYS = ("proxy_auth_enabled", "proxy_auth_header", "proxy_auth_trusted_networks", "proxy_auth_logout_url")
+
+
+class Redirect(Exception):
+    def __init__(self, url: str):
+        self.url = url
+
+
+def safe_next(url: str | None) -> str:
+    """Only allow local redirect targets after login."""
+    if url and url.startswith("/") and not url.startswith("//") and "\\" not in url:
+        return url
+    return "/"
 
 
 def fmt_ts(ts, with_ms=False):
@@ -52,7 +69,7 @@ def fmt_size(n):
 
 
 def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAPI:
-    app = FastAPI(title="MTA-Relay", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="smtp-relay", docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
     templates = Jinja2Templates(directory=BASE / "templates")
     env = templates.env
@@ -62,23 +79,51 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
     env.globals.update(STATUS_LABELS=STATUS_LABELS, KIND_LABELS=KIND_LABELS, version=__version__,
                        queue_count=queue.queued_count)
 
-    user = os.environ.get("WEBUI_USER", "admin")
-    password = os.environ.get("WEBUI_PASSWORD", "")
-    basic = HTTPBasic(auto_error=False)
-    env.globals["auth_disabled"] = not password
+    web_sessions = Sessions(db)
 
-    def auth(request: Request, creds: HTTPBasicCredentials | None = Depends(basic)):
-        if password:
-            ok = creds is not None and \
-                secrets.compare_digest(creds.username.encode(), user.encode()) and \
-                secrets.compare_digest(creds.password.encode(), password.encode())
-            if not ok:
-                raise HTTPException(401, "Authentication required", {"WWW-Authenticate": 'Basic realm="MTA-Relay"'})
+    @app.exception_handler(Redirect)
+    async def handle_redirect(request: Request, exc: Redirect):
+        return RedirectResponse(exc.url, status_code=303)
+
+    def current_user(request: Request) -> tuple[str | None, str]:
+        """(user name, source) where source is 'proxy' or 'local'."""
+        peer = normalize_ip(request.client.host) if request.client else ""
+        user = proxy_user(settings, peer, request.headers)
+        if user:
+            return user, "proxy"
+        if web_sessions.valid(request.cookies.get(SESSION_COOKIE)):
+            return settings.get("auth_username"), "local"
+        return None, ""
+
+    def check_origin(request: Request):
         if request.method == "POST":
             # Basic CSRF protection: POSTs must originate from this UI.
             origin = request.headers.get("origin") or request.headers.get("referer")
             if origin and urlparse(origin).netloc != request.headers.get("host"):
                 raise HTTPException(403, "Invalid request origin")
+
+    def login_required(request: Request):
+        check_origin(request)
+        user, source = current_user(request)
+        if not user:
+            if request.method == "GET":
+                target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+                raise Redirect("/login?" + urlencode({"next": target}))
+            raise HTTPException(401, "Login required")
+        request.state.user, request.state.auth_source = user, source
+
+    def auth(request: Request):
+        login_required(request)
+        if not settings.get("setup_completed"):
+            raise Redirect("/setup")
+
+    def setup_auth(request: Request):
+        login_required(request)
+        if settings.get("setup_completed"):
+            raise Redirect("/")
+
+    def is_https(request: Request) -> bool:
+        return request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"
 
     def render(request, name, **ctx):
         return templates.TemplateResponse(request, name, ctx)
@@ -86,6 +131,124 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
     @app.get("/healthz", response_class=PlainTextResponse)
     def healthz():
         return "ok"
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page(request: Request, next: str = "/"):
+        if current_user(request)[0]:
+            raise Redirect(safe_next(next))
+        return render(request, "login.html", bare=True, next=safe_next(next), error=None, username="",
+                      initial=bool(settings.get("auth_initial_password")))
+
+    @app.post("/login", response_class=HTMLResponse)
+    async def login_submit(request: Request):
+        check_origin(request)
+        form = await request.form()
+        username, password = str(form.get("username", "")), str(form.get("password", ""))
+        target = safe_next(str(form.get("next", "/")))
+        if not check_login(settings, username, password):
+            peer = request.client.host if request.client else "?"
+            log.warning("Failed login for user %r from %s", username, peer)
+            await asyncio.sleep(1)  # slow down password guessing
+            return render(request, "login.html", bare=True, next=target, error="Invalid username or password",
+                          username=username, initial=bool(settings.get("auth_initial_password")))
+        response = RedirectResponse(target, status_code=303)
+        response.set_cookie(SESSION_COOKIE, web_sessions.create(), max_age=SESSION_LIFETIME, httponly=True,
+                            samesite="lax", secure=is_https(request), path="/")
+        return response
+
+    @app.post("/logout")
+    def logout(request: Request):
+        check_origin(request)
+        _, source = current_user(request)
+        web_sessions.delete(request.cookies.get(SESSION_COOKIE))
+        target = "/login"
+        if source == "proxy" and settings.get("proxy_auth_logout_url"):
+            target = settings.get("proxy_auth_logout_url")
+        response = RedirectResponse(target, status_code=303)
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return response
+
+    def render_setup(request, step, **ctx):
+        names = [k for k, _ in SETUP_STEPS]
+        ctx.setdefault("errors", [])
+        return render(request, "setup.html", bare=True, step=step, steps=SETUP_STEPS, index=names.index(step),
+                      s={**settings.snapshot(), **ctx.pop("values", {})}, min_password=MIN_PASSWORD_LENGTH,
+                      initial=bool(settings.get("auth_initial_password")), **ctx)
+
+    @app.get("/setup", dependencies=[Depends(setup_auth)])
+    def setup_start():
+        raise Redirect("/setup/account")
+
+    @app.get("/setup/{step}", response_class=HTMLResponse, dependencies=[Depends(setup_auth)])
+    def setup_page(request: Request, step: str):
+        if step not in dict(SETUP_STEPS):
+            raise Redirect("/setup/account")
+        return render_setup(request, step)
+
+    @app.post("/setup/account", response_class=HTMLResponse, dependencies=[Depends(setup_auth)])
+    async def setup_account(request: Request):
+        form = await request.form()
+        username = str(form.get("username", ""))
+        password, password2 = str(form.get("password", "")), str(form.get("password2", ""))
+        values = {k: form.get(k, "") for k in PROXY_KEYS}
+        values["proxy_auth_enabled"] = "proxy_auth_enabled" in form
+        errors = []
+        initial = settings.get("auth_initial_password")
+        if password or initial:
+            if password != password2:
+                errors.append("The passwords do not match")
+            elif initial and password == initial:
+                errors.append("Please choose your own password instead of the generated one")
+            else:
+                errors = set_credentials(settings, username, password)
+        elif username.strip() != settings.get("auth_username"):
+            errors.append("Enter a password to change the username")
+        if not errors:
+            errors = settings.update(values)
+        if errors:
+            values["proxy_auth_trusted_networks"] = str(values["proxy_auth_trusted_networks"]).splitlines()
+            return render_setup(request, "account", errors=errors, values={"auth_username": username, **values})
+        web_sessions.delete_others(request.cookies.get(SESSION_COOKIE))
+        raise Redirect("/setup/relay")
+
+    @app.post("/setup/relay", response_class=HTMLResponse, dependencies=[Depends(setup_auth)])
+    async def setup_relay(request: Request):
+        form = await request.form()
+        keys = ("relay_host", "relay_port", "relay_security", "relay_username", "relay_password")
+        values = {k: form.get(k, "") for k in keys}
+        values["relay_tls_verify"] = "relay_tls_verify" in form
+        if not values["relay_password"]:
+            values.pop("relay_password")  # keep the stored password
+        errors = settings.update(values)
+        if errors:
+            values.pop("relay_password", None)
+            return render_setup(request, "relay", errors=errors, values=values)
+        if form.get("action") == "test":
+            session_id, ok, detail = await test_connection(db, settings.snapshot())
+            return render_setup(request, "relay", test={"ok": ok, "detail": detail, "session_id": session_id})
+        raise Redirect("/setup/senders")
+
+    @app.post("/setup/senders", response_class=HTMLResponse, dependencies=[Depends(setup_auth)])
+    async def setup_senders(request: Request):
+        form = await request.form()
+        values = {k: form.get(k, "") for k in ("allowed_senders", "allowed_networks")}
+        errors = settings.update(values)
+        if errors:
+            return render_setup(request, "senders", errors=errors,
+                                values={k: str(v).splitlines() for k, v in values.items()})
+        raise Redirect("/setup/options")
+
+    @app.post("/setup/options", response_class=HTMLResponse, dependencies=[Depends(setup_auth)])
+    async def setup_options(request: Request):
+        form = await request.form()
+        values = {k: form.get(k, "") for k in ("rewrite_from_address", "rewrite_name_mode", "notify_address")}
+        values["rewrite_enabled"] = "rewrite_enabled" in form
+        errors = settings.update(values)
+        if errors:
+            return render_setup(request, "options", errors=errors, values=values)
+        settings.set_internal(setup_completed=True)
+        log.info("Setup completed")
+        raise Redirect("/")
 
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(auth)])
     def messages(request: Request, q: str = "", status: str = "", page: int = 1):
@@ -206,8 +369,9 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         return render(request, "session.html", s=s, msgs=msgs)
 
     @app.get("/settings", response_class=HTMLResponse, dependencies=[Depends(auth)])
-    def settings_page(request: Request, saved: int = 0):
-        return render(request, "settings.html", s=settings.snapshot(), errors=[], saved=saved)
+    def settings_page(request: Request, saved: int = 0, account: int = 0):
+        return render(request, "settings.html", s=settings.snapshot(), errors=[], saved=saved,
+                      account_saved=account, account_errors=[], min_password=MIN_PASSWORD_LENGTH)
 
     @app.post("/settings", response_class=HTMLResponse, dependencies=[Depends(auth)])
     async def settings_save(request: Request):
@@ -229,8 +393,27 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
             current = {**settings.snapshot(), **{k: v for k, v in values.items() if k not in LIST_KEYS}}
             for key in LIST_KEYS:
                 current[key] = str(values.get(key, "")).splitlines()
-            return render(request, "settings.html", s=current, errors=errors, saved=0)
+            return render(request, "settings.html", s=current, errors=errors, saved=0, account_errors=[],
+                          min_password=MIN_PASSWORD_LENGTH)
         return RedirectResponse("/settings?saved=1", status_code=303)
+
+    @app.post("/settings/account", response_class=HTMLResponse, dependencies=[Depends(auth)])
+    async def settings_account(request: Request):
+        form = await request.form()
+        username = str(form.get("username", ""))
+        password, password2 = str(form.get("new_password", "")), str(form.get("new_password2", ""))
+        errors = []
+        if not verify_password(str(form.get("current_password", "")), settings.get("auth_password_hash")):
+            errors.append("Current password is wrong")
+        elif password != password2:
+            errors.append("The new passwords do not match")
+        else:
+            errors = set_credentials(settings, username, password)
+        if errors:
+            return render(request, "settings.html", s=settings.snapshot(), errors=[], saved=0,
+                          account_errors=errors, min_password=MIN_PASSWORD_LENGTH)
+        web_sessions.delete_others(request.cookies.get(SESSION_COOKIE))
+        return RedirectResponse("/settings?account=1#account", status_code=303)
 
     @app.post("/settings/clear-history", dependencies=[Depends(auth)])
     def clear_history():
@@ -257,10 +440,10 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         m = EmailMessage()
         m["From"] = sender
         m["To"] = rcpt
-        m["Subject"] = str(form.get("subject") or "MTA-Relay test message")
+        m["Subject"] = str(form.get("subject") or "smtp-relay test message")
         m["Date"] = formatdate(localtime=True)
         m["Message-ID"] = make_msgid(domain=sender.rsplit("@", 1)[-1])
-        m.set_content(str(form.get("body") or "This is a test message from MTA-Relay."))
+        m.set_content(str(form.get("body") or "This is a test message from smtp-relay."))
         raw = m.as_bytes(policy=m.policy.clone(linesep="\r\n"))
         message_id = queue.accept(raw=raw, mail_from=sender, rcpts=[rcpt], client_ip="WebUI",
                                   client_name="Test message")

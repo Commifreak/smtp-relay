@@ -1,4 +1,4 @@
-# MTA-Relay
+# smtp-relay
 
 A small SMTP relay (smarthost client) in a Docker container. It accepts mail from devices and services on
 your local network (NAS, printers, Home Assistant, Proxmox, cron jobs …) and forwards it with
@@ -29,13 +29,18 @@ diagnostics**: every message and every line of both SMTP conversations is record
   - The display name can be kept, or replaced by the original address or a fixed name.
   - Reply-To can be set to the original sender.
   - The original From header is preserved as `X-Original-From`.
+- **Setup wizard** on first start: account, relay server (with connection test), allowed senders, options.
+  No configuration files or environment variables needed.
+- **Login** with username and password; the initial password is generated and printed to the container log.
+- **Single sign-on** via reverse proxy headers, e.g. **Authelia** (`Remote-User`), restricted to trusted
+  proxy networks.
 - **Web UI**
   - **Mail history** with time, client IP, reverse DNS and HELO, sender, recipients, subject, size and
     status; search and filters
   - **Message details** with all headers, text and sandboxed HTML preview, attachment list, raw message
     and `.eml` download
-  - **Full SMTP conversation client → MTA-Relay** with millisecond timestamps
-  - **Full SMTP conversation MTA-Relay → relay server** for every delivery attempt, including TLS version,
+  - **Full SMTP conversation client → smtp-relay** with millisecond timestamps
+  - **Full SMTP conversation smtp-relay → relay server** for every delivery attempt, including TLS version,
     cipher, certificate and rewrite notes. Credentials are masked.
   - **Queue** with attempts, next attempt and last error; actions “Deliver now”, “Remove”,
     “Deliver all now” and “Pause queue”
@@ -46,6 +51,99 @@ diagnostics**: every message and every line of both SMTP conversations is record
   - Auto-refresh and dark mode
 - History in SQLite with configurable retention. Keeping message content permanently can be turned off; it
   is then only kept until delivery is finished.
+
+## Quick start
+
+Prebuilt images for amd64 and arm64 are published to the GitHub Container Registry as
+`ghcr.io/commifreak/smtp-relay`.
+
+1. Create a `docker-compose.yml` (or take the one from this repository):
+
+   ```yaml
+   services:
+     smtp-relay:
+       image: ghcr.io/commifreak/smtp-relay:1
+       container_name: smtp-relay
+       restart: unless-stopped
+       environment:
+         TZ: Europe/Berlin
+       ports:
+         - "25:2525"     # SMTP from the local network
+         - "8080:8080"   # web UI
+       volumes:
+         - smtp-relay-data:/data
+
+   volumes:
+     smtp-relay-data:
+   ```
+
+2. While the image is private, log in to the registry once on the Docker host. Use a GitHub personal
+   access token (classic) with the `read:packages` scope:
+
+   ```bash
+   echo <TOKEN> | docker login ghcr.io -u <github-user> --password-stdin
+   ```
+
+3. Start it and look up the initial password:
+
+   ```bash
+   docker compose up -d
+   docker logs smtp-relay
+   ```
+
+   ```text
+   ================================================================
+     smtp-relay – initial login
+       URL:       http://<docker-host>:8080
+       Username:  admin
+       Password:  4N38cGvHVJggRfdg
+     The setup wizard asks you to choose your own credentials.
+   ================================================================
+   ```
+
+4. Open `http://<docker-host>:8080`, log in and follow the setup wizard. It asks for your own credentials,
+   the relay server (with a connection test), the allowed senders and networks, and optional sender
+   rewriting and failure notifications.
+
+| Login | Setup wizard |
+|-------|--------------|
+| ![Login](docs/screenshots/login.png) | ![Setup wizard: account](docs/screenshots/setup-account.png) |
+
+![Setup wizard: relay server with connection test](docs/screenshots/setup-relay.png)
+
+Then send a test message from your network:
+
+```bash
+swaks --server <docker-host>:25 --from nas@example.com --to you@example.com --header "Subject: Test"
+```
+
+### Forgot the password?
+
+Set `RESET_ADMIN_PASSWORD: "true"` in the `environment` section and restart the container. A new initial
+password is printed to the log (the username stays the same). Remove the variable again afterwards, otherwise
+the password is reset on every start.
+
+### Updates and image tags
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+| Tag         | Contents                                                                 |
+|-------------|--------------------------------------------------------------------------|
+| `1`         | Latest 1.x release – **default in `docker-compose.yml`**, never jumps to 2.x |
+| `1.2`       | Latest 1.2.x release (bug fixes only)                                    |
+| `1.2.0`     | Exactly this release                                                     |
+| `latest`    | Latest build of the `main` branch (may contain unreleased changes)       |
+| `sha-…`     | A specific commit                                                        |
+
+Pinning the major version means a future 2.0 with breaking changes will not be installed automatically;
+switch to `:2` deliberately after reading the release notes.
+
+### Building from source
+
+Clone the repository, replace the `image:` line in `docker-compose.yml` with `build: .` and run
+`docker compose up -d --build`.
 
 ## Screenshots
 
@@ -66,65 +164,6 @@ the other was temporarily refused and is queued for a retry:
 
 ![Settings](docs/screenshots/settings.png)
 
-## Quick start
-
-Prebuilt images for amd64 and arm64 are published to the GitHub Container Registry as
-`ghcr.io/commifreak/mta-relay`.
-
-1. Get `docker-compose.yml` and `.env.example` from this repository, e.g. by cloning it:
-
-   ```bash
-   git clone git@github.com:Commifreak/smtp-relay.git
-   cd smtp-relay
-   cp .env.example .env      # enter relay credentials and a web UI password
-   ```
-
-2. While the image is private, log in to the registry once on the Docker host. Use a GitHub personal
-   access token (classic) with the `read:packages` scope:
-
-   ```bash
-   echo <TOKEN> | docker login ghcr.io -u <github-user> --password-stdin
-   ```
-
-3. Start it:
-
-   ```bash
-   docker compose up -d
-   ```
-
-- SMTP: `<docker-host>:25`
-- Web UI: `http://<docker-host>:8080` (user and password from `WEBUI_USER` / `WEBUI_PASSWORD`)
-
-Then open **Diagnostics → Test connection** to check the login at your provider, and maintain the allowed
-senders under **Settings**.
-
-Test from the LAN:
-
-```bash
-swaks --server <docker-host>:25 --from nas@example.com --to you@example.com --header "Subject: Test"
-```
-
-### Updates and image tags
-
-```bash
-docker compose pull && docker compose up -d
-```
-
-| Tag         | Contents                                                                 |
-|-------------|--------------------------------------------------------------------------|
-| `1`         | Latest 1.x release – **default in `docker-compose.yml`**, never jumps to 2.x |
-| `1.1`       | Latest 1.1.x release (bug fixes only)                                    |
-| `1.1.0`     | Exactly this release                                                     |
-| `latest`    | Latest build of the `main` branch (may contain unreleased changes)       |
-| `sha-…`     | A specific commit                                                        |
-
-Pinning the major version means a future 2.0 with breaking changes will not be installed automatically;
-switch to `:2` deliberately after reading the release notes.
-
-### Building from source
-
-Replace the `image:` line in `docker-compose.yml` with `build: .` and run `docker compose up -d --build`.
-
 ## mailbox.org
 
 | Setting         | Value                                   |
@@ -139,22 +178,42 @@ verified domain. For services with arbitrary senders (`root@nas.local` …), ena
 enter one of your own addresses as the new sender address. With “Original address as display name” you can
 still see at a glance which service sent the message.
 
+## Single sign-on with Authelia
+
+If the web UI is published through a reverse proxy with forward authentication, smtp-relay can log users in
+from the proxy's user header:
+
+1. Configure forward authentication for the smtp-relay host in your proxy and pass on the `Remote-User`
+   header. With Traefik, for example, as a middleware:
+
+   ```yaml
+   labels:
+     - traefik.http.middlewares.authelia.forwardauth.address=http://authelia:9091/api/authz/forward-auth
+     - traefik.http.middlewares.authelia.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Email,Remote-Name
+     - traefik.http.routers.smtp-relay.middlewares=authelia
+   ```
+
+2. In smtp-relay under **Settings → Single sign-on** (or in the setup wizard), enable “Trust the user header
+   of the reverse proxy”, keep the header `Remote-User` and enter the network your proxy connects from, e.g.
+   the Docker network `172.18.0.0/16`. Optionally set Authelia's logout URL.
+
+The header is only accepted from the trusted proxy networks, so clients that reach port 8080 directly cannot
+spoof it. Access control (who may use smtp-relay) is configured in Authelia. The local login keeps working as
+a fallback, e.g. when the proxy is down.
+
 ## Configuration
 
-All functional settings are managed in the web UI and stored in the volume (`/data/mta-relay.db`). The
-environment variables in `.env` (see `.env.example`) only provide **initial values on the very first start**.
+Everything is configured in the setup wizard and the web UI and stored in the volume
+(`/data/smtp-relay.db`). Only these optional environment variables exist:
 
-These variables are only read from the environment:
-
-| Variable           | Default         | Meaning                                              |
-|--------------------|-----------------|------------------------------------------------------|
-| `WEBUI_USER`       | `admin`         | Web UI username                                      |
-| `WEBUI_PASSWORD`   | –               | Web UI password (without it the UI is open!)         |
-| `SMTP_LISTEN_PORT` | `2525`          | SMTP port inside the container                       |
-| `WEB_PORT`         | `8080`          | Web UI port inside the container                     |
-| `TZ`               | `Europe/Berlin` | Time zone used for display                           |
-| `TLS_CERT_FILE` / `TLS_KEY_FILE` | – | Enables STARTTLS for inbound connections           |
-| `LOG_LEVEL`        | `INFO`          | Log level of the container logs                      |
+| Variable           | Default         | Meaning                                                    |
+|--------------------|-----------------|------------------------------------------------------------|
+| `TZ`               | `Europe/Berlin` | Time zone used for display                                 |
+| `RESET_ADMIN_PASSWORD` | –           | `true` prints a new initial password on start              |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE` | – | Enables STARTTLS for inbound connections                 |
+| `LOG_LEVEL`        | `INFO`          | Log level of the container logs                            |
+| `SMTP_LISTEN_PORT` | `2525`          | SMTP port inside the container                             |
+| `WEB_PORT`         | `8080`          | Web UI port inside the container                           |
 
 ### Client IP and Docker
 
@@ -162,7 +221,7 @@ The network check and the history use the source IP of the connection. In the de
 mapping, the real client IP is usually preserved for IPv4 (iptables DNAT). If the web UI only shows the
 gateway IP of the Docker network (e.g. `172.17.0.1`), use one of these options:
 
-- `network_mode: host` in `docker-compose.yml` (then set `SMTP_LISTEN_PORT=25` and remove `ports:`;
+- `network_mode: host` in `docker-compose.yml` (then set `SMTP_LISTEN_PORT: 25` and remove `ports:`;
   port 25 then needs root or `cap_add: [NET_BIND_SERVICE]`)
 - or `"userland-proxy": false` in `/etc/docker/daemon.json`
 
@@ -170,8 +229,10 @@ gateway IP of the Docker network (e.g. `172.17.0.1`), use one of these options:
 
 - Do **not** expose the SMTP port to the internet. Together with the allowed networks and senders this
   keeps the service from becoming an open relay.
-- Set `WEBUI_PASSWORD`. The web UI shows message content and holds the relay password, which is stored in
-  the database in the volume.
+- Complete the setup wizard right after the first start: until then, anyone who can read the container log
+  can log in with the initial password.
+- The web UI shows message content and holds the relay password, which is stored in the database in the
+  volume. Publish it only through HTTPS (reverse proxy) if it is reachable from outside your LAN.
 - If message content should not be kept, disable “Keep message content”. While a message is queued, its
   content is still stored. Metadata and SMTP transcripts are kept, but “Resend” is then not available.
 
@@ -180,7 +241,7 @@ gateway IP of the Docker network (e.g. `172.17.0.1`), use one of these options:
 ```bash
 pip install -r requirements-dev.txt
 pytest -q
-DATA_DIR=./data WEBUI_PASSWORD=test python -m app.main
+DATA_DIR=./data python -m app.main
 ```
 
 Layout:
@@ -189,7 +250,9 @@ Layout:
 - `app/delivery.py`: queue, delivery attempts, retries and failure notifications
 - `app/relay.py`: SMTP connection to the relay (smtplib) with recording of the outbound conversation
 - `app/rewrite.py`: header rewriting on the raw message, so the body stays untouched
-- `app/web.py` and `app/templates/`: web UI (FastAPI and Jinja2, no external browser dependencies)
+- `app/auth.py`: admin account, login sessions and reverse proxy authentication
+- `app/web.py` and `app/templates/`: web UI incl. setup wizard (FastAPI and Jinja2, no external browser
+  dependencies)
 - `app/db.py`: SQLite (settings, sessions, transcript lines, messages)
 
 The GitHub Action runs the tests on every push and pull request. Pushes to `main` publish the `latest`

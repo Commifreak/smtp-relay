@@ -1,6 +1,6 @@
 (function () {
   var box = document.getElementById("autorefresh");
-  var key = "mta-relay-autorefresh";
+  var key = "smtp-relay-autorefresh";
   var on = false;
   try { on = localStorage.getItem(key) === "1"; } catch (e) {}
   box.checked = on;

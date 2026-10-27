@@ -20,7 +20,7 @@ from .db import Database, Transcript
 from .relay import reply_text, send_sync
 from .rewrite import header_meta, prepare, split_message
 
-log = logging.getLogger("mta-relay.queue")
+log = logging.getLogger("smtp-relay.queue")
 
 FINAL = ("relayed", "partial", "failed")
 BATCH = 20
@@ -261,7 +261,7 @@ class DeliveryQueue:
             return
         sender = settings.get("rewrite_from_address") or settings.get("relay_username") or to
         m = EmailMessage()
-        m["From"] = f"MTA-Relay <{sender}>"
+        m["From"] = f"smtp-relay <{sender}>"
         m["To"] = to
         m["Subject"] = f"Undeliverable: {row['subject'] or '(no subject)'}"
         m["Date"] = formatdate(localtime=True)
@@ -271,7 +271,7 @@ class DeliveryQueue:
         if row["client_name"]:
             client += f" ({row['client_name']})"
         lines = [
-            "MTA-Relay could not (fully) deliver the following message.",
+            "smtp-relay could not (fully) deliver the following message.",
             "",
             f"Message:     #{row['id']}",
             f"Received:    {_fmt_time(row['received_at'])}",
@@ -292,6 +292,6 @@ class DeliveryQueue:
             m.add_attachment(b"".join(fields), maintype="text", subtype="rfc822-headers",
                              filename="original-headers.txt")
         raw = m.as_bytes(policy=m.policy.clone(linesep="\r\n"))
-        self.accept(raw=raw, mail_from=sender, rcpts=[to], status="queued", client_ip="MTA-Relay",
+        self.accept(raw=raw, mail_from=sender, rcpts=[to], status="queued", client_ip="smtp-relay",
                     client_name="Notification", is_notification=1)
         self.wake()

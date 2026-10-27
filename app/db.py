@@ -51,6 +51,11 @@ CREATE TABLE IF NOT EXISTS messages (
     raw                BLOB
 );
 CREATE INDEX IF NOT EXISTS ix_messages_received ON messages(received_at);
+CREATE TABLE IF NOT EXISTS web_sessions (
+    token_hash  TEXT PRIMARY KEY,
+    created_at  REAL NOT NULL,
+    expires_at  REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS ix_messages_session ON messages(session_id);
 """
 

@@ -78,7 +78,28 @@
   <label class="check"><input type="checkbox" name="store_content" {{ 'checked' if s.store_content }}> Keep message content (for viewing and “Resend”; otherwise only until delivery is finished)</label>
   <div class="row"><label>Retention (days, 0 = forever)<input type="number" min="0" name="retention_days" value="{{ s.retention_days }}"></label></div>
 </fieldset>
+<fieldset>
+  <legend>Single sign-on (reverse proxy)</legend>
+  {% include "_proxy_auth.html" %}
+</fieldset>
 <button class="primary">Save</button>
+</form>
+
+<form method="post" action="/settings/account" class="settings" id="account">
+<fieldset>
+  <legend>Account</legend>
+  {% if account_saved %}<div class="alert ok">Account updated. Other sessions have been signed out.</div>{% endif %}
+  {% for e in account_errors %}<div class="alert err">{{ e }}</div>{% endfor %}
+  <div class="row">
+    <label>Username<input name="username" value="{{ s.auth_username }}" autocomplete="username" required></label>
+    <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
+  </div>
+  <div class="row">
+    <label>New password <small>at least {{ min_password }} characters</small><input type="password" name="new_password" autocomplete="new-password" required></label>
+    <label>Repeat new password<input type="password" name="new_password2" autocomplete="new-password" required></label>
+  </div>
+  <button>Change account</button>
+</fieldset>
 </form>
 
 <fieldset class="danger">

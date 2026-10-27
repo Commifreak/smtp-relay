@@ -7,13 +7,14 @@ import time
 
 import uvicorn
 
+from .auth import ensure_credentials
 from .config import Settings
 from .db import Database
 from .delivery import DeliveryQueue
 from .smtp_server import protocol_factory
 from .web import create_app
 
-log = logging.getLogger("mta-relay")
+log = logging.getLogger("smtp-relay")
 
 
 def load_tls_context() -> ssl.SSLContext | None:
@@ -42,8 +43,17 @@ async def main() -> None:
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     data_dir = os.environ.get("DATA_DIR", "/data")
     os.makedirs(data_dir, exist_ok=True)
-    db = Database(os.path.join(data_dir, "mta-relay.db"))
+    db_path = os.path.join(data_dir, "smtp-relay.db")
+    for suffix in ("", "-wal", "-shm"):  # database of releases named "MTA-Relay"
+        old = os.path.join(data_dir, "mta-relay.db" + suffix)
+        if os.path.exists(old) and not os.path.exists(db_path + suffix):
+            os.rename(old, db_path + suffix)
+    db = Database(db_path)
     settings = Settings(db)
+    reset = os.environ.get("RESET_ADMIN_PASSWORD", "").lower() in ("1", "true", "yes")
+    ensure_credentials(settings, reset=reset)
+    if reset:
+        log.warning("RESET_ADMIN_PASSWORD is set – remove it again, otherwise the password is reset on every start")
 
     smtp_host = os.environ.get("SMTP_LISTEN_HOST") or None
     smtp_port = int(os.environ.get("SMTP_LISTEN_PORT", "2525"))
@@ -54,11 +64,13 @@ async def main() -> None:
     server = await loop.create_server(protocol_factory(db, settings, queue, load_tls_context()),
                                       host=smtp_host, port=smtp_port)
     log.info("SMTP listening on port %s, web UI on port %s", smtp_port, web_port)
-    if not settings.get("allowed_senders"):
+    if not settings.get("setup_completed"):
+        log.warning("Setup not completed yet – open the web UI to run the setup wizard")
+    elif not settings.get("allowed_senders"):
         log.warning("No allowed senders configured – all mail will be rejected")
 
     web = uvicorn.Server(uvicorn.Config(create_app(db, settings, queue), host="0.0.0.0", port=web_port,
-                                        log_level="warning", proxy_headers=True))
+                                        log_level="warning", proxy_headers=False))
     tasks = [asyncio.create_task(purge_loop(db, settings)), asyncio.create_task(queue.run())]
     try:
         await web.serve()

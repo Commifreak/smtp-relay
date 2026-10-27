@@ -99,3 +99,19 @@ legend { font-weight: 700; padding: 0 6px; }
 .count { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--warn-bg); color: var(--warn); font-size: 12px; font-weight: 700; text-align: center; }
 .st-queued { background: var(--warn-bg); color: var(--warn); }
 form.inline { display: inline; margin: 0; }
+form.user { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 13px; }
+form.user button { padding: 3px 10px; font-size: 13px; }
+.narrow { max-width: 420px; margin: 40px auto; }
+.narrow.wide { max-width: 760px; margin-top: 24px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px 20px; }
+.card h2 { margin-top: 0; }
+.alert.info { background: var(--info-bg); color: var(--text); }
+.steps { display: flex; gap: 8px; list-style: none; padding: 0; margin: 0 0 16px; counter-reset: step; flex-wrap: wrap; }
+.steps li { counter-increment: step; color: var(--muted); padding: 4px 12px 4px 4px; border-radius: 16px; background: var(--panel); border: 1px solid var(--border); }
+.steps li::before { content: counter(step); display: inline-block; width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 50%; background: var(--code-bg); margin-right: 6px; font-size: 12px; font-weight: 700; }
+.steps li.current { color: var(--text); border-color: var(--accent); }
+.steps li.current::before { background: var(--accent); color: var(--accent-text); }
+.steps li.done::before { content: "✓"; background: var(--ok-bg); color: var(--ok); }
+.wizard-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; gap: 8px; }
+details > .details-body { margin: 0; padding: 0 12px 12px; }
+#account { margin-top: 24px; }

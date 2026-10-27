@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}MTA-Relay{% endblock %} · MTA-Relay</title>
+<title>{% block title %}smtp-relay{% endblock %} · smtp-relay</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="/">MTA-Relay</a>
+  <a class="brand" href="/">smtp-relay</a>
+  {% if not bare %}
   <nav>
     <a href="/" class="{{ 'active' if request.url.path == '/' or request.url.path.startswith('/messages') }}">Mail history</a>
     {% set qn = queue_count() %}
@@ -18,12 +19,18 @@
     <a href="/settings" class="{{ 'active' if request.url.path.startswith('/settings') }}">Settings</a>
   </nav>
   <label class="live"><input type="checkbox" id="autorefresh"> Auto-refresh</label>
+  {% if request.state.user is defined %}
+  <form method="post" action="/logout" class="user">
+    <span title="{{ 'Signed in via proxy' if request.state.auth_source == 'proxy' else 'Signed in' }}">{{ request.state.user }}</span>
+    <button>Log out</button>
+  </form>
+  {% endif %}
+  {% endif %}
 </header>
 <main>
-{% if auth_disabled %}<div class="alert warn">The web UI is not password protected. Set <code>WEBUI_PASSWORD</code> to restrict access.</div>{% endif %}
 {% block content %}{% endblock %}
 </main>
-<footer>MTA-Relay {{ version }}</footer>
+<footer>smtp-relay {{ version }}</footer>
 <script src="/static/app.js"></script>
 </body>
 </html>
