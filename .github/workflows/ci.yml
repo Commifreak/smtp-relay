@@ -6,6 +6,10 @@ on:
     tags: ["v*"]
   pull_request:
 
+# Read-only by default; the image job requests package write access itself.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
