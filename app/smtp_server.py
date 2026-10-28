@@ -115,6 +115,7 @@ class LoggingSMTP(SMTP):
         if not ip_allowed(self.client_ip, networks):
             self.transcript.error(f"Client IP {self.client_ip} is not in the allowed networks")
             self.db.update_session(self.db_session_id, result="rejected: network")
+            self.event_handler.queue.alerts.client_rejected(self.client_ip)
             await self.push(f"554 5.7.1 Client {self.client_ip} not allowed to relay")
             self.transport.close()
             return
@@ -149,6 +150,7 @@ class RelayHandler:
                                    mail_from=address, rcpt_to="[]", status="rejected",
                                    detail=f"Sender not allowed ({reason})")
             self.db.update_session(server.db_session_id, result="rejected: sender")
+            self.queue.alerts.sender_rejected(address, server.client_ip)
             return f"550 5.7.1 Sender address <{address}> not allowed"
         server.transcript.info(f"Sender <{address}> matches {pattern} → relay “{relay['name']}”")
         envelope.mail_from = address

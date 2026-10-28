@@ -143,7 +143,7 @@ def test_sender_rejected(env):
 
 
 def test_permanent_rejection_is_returned_and_notified(env):
-    env.settings.update({"notify_address": "admin@example.de"})
+    env.settings.update({"alert_address": "admin@example.de"})
     env.upstream.reject_rcpt.add("bad@example.de")
     with pytest.raises(smtplib.SMTPDataError) as exc:
         env.send(mail_from="x@home.lan", rcpts=["bad@example.de"])
@@ -154,7 +154,7 @@ def test_permanent_rejection_is_returned_and_notified(env):
     note = env.db.query_one("SELECT * FROM messages WHERE is_notification = 1")
     assert note["status"] == "queued"
     assert json.loads(note["rcpt_to"]) == ["admin@example.de"]
-    assert note["subject"] == "Undeliverable: Backup ok"
+    assert note["subject"] == "[smtp-relay] Undeliverable: Backup ok"
 
 
 def test_network_rejected(env):
@@ -220,7 +220,7 @@ def test_temporary_recipient_failure_retries_only_that_recipient(env):
 
 
 def test_queue_lifetime_exceeded(env):
-    env.settings.update({"notify_address": "admin@example.de"})
+    env.settings.update({"alert_address": "admin@example.de"})
     env.relay_down()
     env.send()
     env.db.execute("UPDATE messages SET queued_at = ? WHERE id = 1", (time.time() - 49 * 3600,))
@@ -229,9 +229,10 @@ def test_queue_lifetime_exceeded(env):
     m = env.message()
     assert m["status"] == "failed"
     assert "lifetime" in m["failed_rcpts"]
-    notes = env.db.query("SELECT * FROM messages WHERE is_notification = 1")
-    assert len(notes) == 1  # no notification about the (also failing) notification
-    assert notes[0]["status"] == "queued"
+    alerts = {n["subject"]: n for n in env.db.query("SELECT * FROM messages WHERE is_notification = 1")}
+    # one alert for the relay outage, one for the message; none about the (also failing) alerts
+    assert set(alerts) == {"[smtp-relay] Relay “upstream” is not working", "[smtp-relay] Undeliverable: Backup ok"}
+    assert all(a["status"] == "queued" for a in alerts.values())
 
 
 def test_recover_interrupted_delivery(env):
@@ -284,7 +285,7 @@ def test_web_ui(env):
     assert r.status_code == 303 and env.settings.get("queue_paused") is True
     r = client.post("/settings", data={"allowed_networks": "127.0.0.0/8", "smtp_hostname": "x",
                                        "max_message_size_mb": "10", "relay_timeout": "5", "retention_days": "7",
-                                       "retry_intervals": "2,4", "queue_max_age_hours": "24", "notify_address": ""},
+                                       "retry_intervals": "2,4", "queue_max_age_hours": "24", "alert_address": ""},
                     follow_redirects=False)
     assert r.status_code == 303
     assert env.settings.get("relay_timeout") == 5
@@ -366,3 +367,104 @@ def test_web_relay_management(env):
     assert "second" in client.get("/relays").text
     client.post(f"/relays/{relay['id']}/delete")
     assert env.queue.relays.route("x@other.lan") == (None, None)
+
+
+def alert_subjects(env):
+    return [m["subject"] for m in env.db.query("SELECT subject FROM messages WHERE client_name = 'Alert' ORDER BY id")]
+
+
+def test_no_alerts_without_address(env):
+    env.relay_down()
+    env.send()
+    with pytest.raises(smtplib.SMTPSenderRefused):
+        env.send(mail_from="evil@example.com")
+    assert alert_subjects(env) == []
+
+
+def test_relay_down_alert_once_and_recovery(env):
+    env.settings.update({"alert_address": "admin@example.de"})
+    env.relay_down()
+    env.send()
+    env.send(mail_from="camera@home.lan")  # second failure during the same outage: no second alert
+    assert alert_subjects(env) == ["[smtp-relay] Relay “upstream” is not working"]
+    env.relay_up()
+    env.make_due()
+    env.run(env.queue.process_due())
+    assert alert_subjects(env) == ["[smtp-relay] Relay “upstream” is not working",
+                                   "[smtp-relay] Relay “upstream” works again"]
+    assert all(m["status"] == "relayed" for m in env.db.query("SELECT status FROM messages"))
+    alerts = [m for m in env.upstream.messages if m.rcpt_tos == ["admin@example.de"]]
+    assert len(alerts) == 2 and b"Subject: [smtp-relay] Relay" in alerts[0].content
+
+
+def test_relay_down_alert_prefers_other_relay(env):
+    _, errors = env.queue.relays.save({"name": "backup", "host": "127.0.0.1", "port": env.up_port,
+                                       "security": "none", "senders": ["@backup.lan"]})
+    assert not errors
+    env.settings.update({"alert_address": "admin@example.de"})
+    env.relay_down()
+    env.send()
+    alert = env.db.query_one("SELECT * FROM messages WHERE client_name = 'Alert'")
+    assert alert["relay_id"] == env.queue.relays.route("x@backup.lan")[0]["id"]
+
+
+def test_recipient_rejection_is_no_relay_outage(env):
+    """Recipient rejections are not relay outages."""
+    env.settings.update({"alert_address": "admin@example.de"})
+    env.upstream.reject_rcpt.add("bad@example.de")
+    with pytest.raises(smtplib.SMTPDataError):
+        env.send(rcpts=["bad@example.de"])
+    assert alert_subjects(env) == ["[smtp-relay] Undeliverable: Backup ok"]
+
+
+def test_queue_backlog_alert(env):
+    env.settings.update({"alert_address": "admin@example.de", "alert_queue_backlog_minutes": 5,
+                         "alert_relay_down": False})
+    env.relay_down()
+    env.send()
+    env.queue.alerts.check_queue_backlog()
+    assert alert_subjects(env) == []  # not stuck long enough yet
+    env.db.execute("UPDATE messages SET queued_at = ? WHERE id = 1", (time.time() - 600,))
+    env.queue.alerts.check_queue_backlog()
+    env.queue.alerts.check_queue_backlog()
+    assert alert_subjects(env) == ["[smtp-relay] 1 message(s) waiting in the queue"]
+    env.relay_up()
+    env.make_due()
+    env.run(env.queue.process_due())
+    env.queue.alerts.check_queue_backlog()
+    assert alert_subjects(env)[-1] == "[smtp-relay] Queue is empty again"
+
+
+def test_rejection_alerts_are_throttled(env):
+    env.settings.update({"alert_address": "admin@example.de", "alert_client_rejected": True})
+    for _ in range(2):
+        with pytest.raises(smtplib.SMTPSenderRefused):
+            env.send(mail_from="evil@example.com")
+    env.settings.update({"allowed_networks": ["10.0.0.0/8"]})
+    for _ in range(2):
+        with pytest.raises(smtplib.SMTPConnectError):
+            smtplib.SMTP("127.0.0.1", env.port)
+    assert alert_subjects(env) == ["[smtp-relay] Rejected unknown sender evil@example.com",
+                                   "[smtp-relay] Rejected connection from 127.0.0.1"]
+
+
+def test_disabled_alert_kind(env):
+    env.settings.update({"alert_address": "admin@example.de", "alert_sender_rejected": False})
+    with pytest.raises(smtplib.SMTPSenderRefused):
+        env.send(mail_from="evil@example.com")
+    assert alert_subjects(env) == []
+
+
+def test_login_failed_alert_and_test_alert(env):
+    client = web_client(env)
+    env.settings.update({"alert_address": "admin@example.de", "public_url": "https://relay.example.de/"})
+    client.post("/login", data={"username": "admin", "password": "wrong"})
+    assert alert_subjects(env) == ["[smtp-relay] Failed login from testclient"]
+    r = client.post("/settings/test-alert", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/messages/")
+    test_alert = env.db.query_one("SELECT * FROM messages WHERE subject = '[smtp-relay] Test alert'")
+    assert test_alert["status"] == "relayed"
+    assert b"Details: https://relay.example.de/" in env.upstream.messages[-1].content
+    env.settings.update({"alert_address": ""})
+    r = client.post("/settings/test-alert", follow_redirects=False)
+    assert r.headers["location"] == "/settings?alert_error=1#alerts"

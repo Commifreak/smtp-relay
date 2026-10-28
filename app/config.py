@@ -19,7 +19,16 @@ DEFAULTS: dict = {
     "retry_intervals": "1, 5, 15, 30, 60",  # minutes; the last value repeats
     "queue_max_age_hours": 48,
     "queue_paused": False,
-    "notify_address": "",
+    "alert_address": "",               # receives alert mails; empty = alerts off
+    "alert_relay_id": 0,               # relay for alert mails; 0 = automatic
+    "alert_delivery_failed": True,
+    "alert_relay_down": True,
+    "alert_queue_backlog": True,
+    "alert_queue_backlog_minutes": 30,
+    "alert_sender_rejected": True,
+    "alert_client_rejected": False,
+    "alert_login_failed": True,
+    "public_url": "",                  # web UI address for links in alert mails
     "proxy_auth_enabled": False,
     "proxy_auth_header": "Remote-User",
     "proxy_auth_trusted_networks": [],
@@ -86,8 +95,15 @@ def validate(values: dict) -> tuple[dict, list[str]]:
             clean["retry_intervals"] = ", ".join(str(m) for m in parse_intervals(clean["retry_intervals"]))
         except ValueError:
             errors.append("Retry intervals: enter comma-separated minutes greater than 0, e.g. 1, 5, 15, 60")
-    if clean.get("notify_address") and not ADDRESS_RE.match(clean["notify_address"]):
-        errors.append("Invalid notification address")
+    if clean.get("alert_address") and not ADDRESS_RE.match(clean["alert_address"]):
+        errors.append("Invalid alert address")
+    if "alert_queue_backlog_minutes" in clean and clean["alert_queue_backlog_minutes"] < 1:
+        errors.append("The queue alert needs at least 1 minute")
+    public_url = clean.get("public_url")
+    if public_url and not public_url.startswith(("http://", "https://")):
+        errors.append("Web UI address must start with http:// or https://")
+    elif public_url:
+        clean["public_url"] = public_url.rstrip("/")
     if "queue_max_age_hours" in clean and clean["queue_max_age_hours"] < 1:
         errors.append("Maximum queue lifetime must be at least 1 hour")
     if "proxy_auth_header" in clean and not HEADER_RE.match(clean["proxy_auth_header"]):

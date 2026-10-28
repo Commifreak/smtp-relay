@@ -150,6 +150,7 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         if not check_login(settings, username, password):
             peer = request.client.host if request.client else "?"
             log.warning("Failed login for user %r from %s", username, peer)
+            queue.alerts.login_failed(username, peer)
             await asyncio.sleep(1)  # slow down password guessing
             return render(request, "login.html", bare=True, next=target, error="Invalid username or password",
                           username=username, initial=bool(settings.get("auth_initial_password")))
@@ -258,11 +259,11 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         form = await request.form()
         rewrite = {k: str(form.get(k, "")) for k in ("rewrite_from_address", "rewrite_name_mode")}
         rewrite["rewrite_enabled"] = "rewrite_enabled" in form
-        notify = str(form.get("notify_address", ""))
+        alert_address = str(form.get("alert_address", ""))
         _, errors = relays.save(rewrite, relay["id"])
-        errors += settings.update({"notify_address": notify})
+        errors += settings.update({"alert_address": alert_address})
         if errors:
-            return render_setup(request, "options", errors=errors, values={"notify_address": notify},
+            return render_setup(request, "options", errors=errors, values={"alert_address": alert_address},
                                 relay_values=rewrite)
         settings.set_internal(setup_completed=True)
         log.info("Setup completed")
@@ -448,9 +449,18 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
         return render(request, "session.html", s=s, msgs=msgs)
 
     @app.get("/settings", response_class=HTMLResponse, dependencies=[Depends(auth)])
-    def settings_page(request: Request, saved: int = 0, account: int = 0):
+    def settings_page(request: Request, saved: int = 0, account: int = 0, alert_error: int = 0):
         return render(request, "settings.html", s=settings.snapshot(), errors=[], saved=saved,
-                      account_saved=account, account_errors=[], min_password=MIN_PASSWORD_LENGTH)
+                      account_saved=account, account_errors=[], min_password=MIN_PASSWORD_LENGTH,
+                      relays=relays.all(), alert_error=alert_error)
+
+    @app.post("/settings/test-alert", dependencies=[Depends(auth)])
+    async def settings_test_alert():
+        message_id = queue.alerts.test()
+        if message_id is None:
+            raise Redirect("/settings?alert_error=1#alerts")
+        await queue.deliver_now(message_id)
+        raise Redirect(f"/messages/{message_id}")
 
     @app.post("/settings", response_class=HTMLResponse, dependencies=[Depends(auth)])
     async def settings_save(request: Request):
@@ -473,7 +483,7 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
             for key in LIST_KEYS:
                 current[key] = str(values.get(key, "")).splitlines()
             return render(request, "settings.html", s=current, errors=errors, saved=0, account_errors=[],
-                          min_password=MIN_PASSWORD_LENGTH)
+                          min_password=MIN_PASSWORD_LENGTH, relays=relays.all(), alert_error=0)
         return RedirectResponse("/settings?saved=1", status_code=303)
 
     @app.post("/settings/account", response_class=HTMLResponse, dependencies=[Depends(auth)])
@@ -490,7 +500,8 @@ def create_app(db: Database, settings: Settings, queue: DeliveryQueue) -> FastAP
             errors = set_credentials(settings, username, password)
         if errors:
             return render(request, "settings.html", s=settings.snapshot(), errors=[], saved=0,
-                          account_errors=errors, min_password=MIN_PASSWORD_LENGTH)
+                          account_errors=errors, min_password=MIN_PASSWORD_LENGTH, relays=relays.all(),
+                          alert_error=0)
         web_sessions.delete_others(request.cookies.get(SESSION_COOKIE))
         return RedirectResponse("/settings?account=1#account", status_code=303)
 

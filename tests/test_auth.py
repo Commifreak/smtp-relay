@@ -127,14 +127,14 @@ def test_setup_wizard(settings):
                                             "rewrite_name_mode": "keep"})
     assert "valid sender address" in r.text
     r = client.post("/setup/options", data={"rewrite_enabled": "on", "rewrite_from_address": "relay@example.net",
-                                            "rewrite_name_mode": "address", "notify_address": "me@example.net"},
+                                            "rewrite_name_mode": "address", "alert_address": "me@example.net"},
                     follow_redirects=False)
     assert r.headers["location"] == "/"
     assert settings.get("setup_completed") is True
     relay = Relays(settings.db).first()
     assert relay["senders"] == ["nas@example.com", "@iot.example.com"]
     assert relay["rewrite_from_address"] == "relay@example.net" and relay["password"] == "pw"
-    assert settings.get("notify_address") == "me@example.net"
+    assert settings.get("alert_address") == "me@example.net"
 
     assert client.get("/").status_code == 200
     assert client.get("/setup/account", follow_redirects=False).headers["location"] == "/"
