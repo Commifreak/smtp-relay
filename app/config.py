@@ -21,6 +21,7 @@ DEFAULTS: dict = {
     "queue_paused": False,
     "alert_address": "",               # receives alert mails; empty = alerts off
     "alert_relay_id": 0,               # relay for alert mails; 0 = automatic
+    "alert_from_address": "",          # sender of alert mails; empty = derived from the relay
     "alert_delivery_failed": True,
     "alert_relay_down": True,
     "alert_queue_backlog": True,
@@ -97,6 +98,8 @@ def validate(values: dict) -> tuple[dict, list[str]]:
             errors.append("Retry intervals: enter comma-separated minutes greater than 0, e.g. 1, 5, 15, 60")
     if clean.get("alert_address") and not ADDRESS_RE.match(clean["alert_address"]):
         errors.append("Invalid alert address")
+    if clean.get("alert_from_address") and not ADDRESS_RE.match(clean["alert_from_address"]):
+        errors.append("Invalid alert sender address")
     if "alert_queue_backlog_minutes" in clean and clean["alert_queue_backlog_minutes"] < 1:
         errors.append("The queue alert needs at least 1 minute")
     public_url = clean.get("public_url")

@@ -34,6 +34,9 @@
   <p class="hint">smtp-relay sends an alert mail when something needs your attention. Alerts go through the queue like any other mail and appear in the mail history.</p>
   <div class="row">
     <label>Send alerts to <small>empty = no alerts</small><input name="alert_address" value="{{ s.alert_address }}" placeholder="admin@example.com"></label>
+    <label>Send alerts from <small>optional; must be accepted by the relay</small><input name="alert_from_address" value="{{ s.alert_from_address }}" placeholder="smtp-relay@example.com"></label>
+  </div>
+  <div class="row">
     <label>Send through relay <small>automatic: prefers a relay other than a failing one</small>
       <select name="alert_relay_id">
         <option value="0" {{ 'selected' if not s.alert_relay_id }}>Automatic</option>
@@ -41,6 +44,7 @@
       </select></label>
     <label>Web UI address <small>optional, for links in alert mails</small><input name="public_url" value="{{ s.public_url }}" placeholder="https://smtp-relay.example.com"></label>
   </div>
+  <p class="hint">Alerts are sent as “smtp-relay &lt;address&gt;”. Without a sender address, the relay's sender rewriting address is used, otherwise the relay username if it is an email address, otherwise the alert address itself. The relay's sender rewriting is not applied to alerts.</p>
   <label class="check"><input type="checkbox" name="alert_delivery_failed" {{ 'checked' if s.alert_delivery_failed }}> A message could not be delivered (finally failed or partially rejected)</label>
   <label class="check"><input type="checkbox" name="alert_relay_down" {{ 'checked' if s.alert_relay_down }}> A relay is unreachable or rejects the login – once per outage, plus a mail when it works again</label>
   <label class="check alert-backlog"><input type="checkbox" name="alert_queue_backlog" {{ 'checked' if s.alert_queue_backlog }}> Messages wait in the queue for more than
