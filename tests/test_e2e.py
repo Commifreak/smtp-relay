@@ -468,3 +468,33 @@ def test_login_failed_alert_and_test_alert(env):
     env.settings.update({"alert_address": ""})
     r = client.post("/settings/test-alert", follow_redirects=False)
     assert r.headers["location"] == "/settings?alert_error=1#alerts"
+
+
+def test_alert_sender_address(env):
+    """Alerts keep "smtp-relay" as display name and are not rewritten by the relay."""
+    assert not env.queue.relays.save({"rewrite_name_mode": "address"}, env.relay_id)[1]
+    env.settings.update({"alert_address": "admin@example.de"})
+    client = web_client(env)
+    client.post("/settings/test-alert")
+    msg = env.upstream.messages[-1]
+    assert msg.mail_from == "relay@example.de"  # the relay's rewriting address
+    assert b"From: smtp-relay <relay@example.de>" in msg.content and b"X-Original-From" not in msg.content
+
+    env.settings.update({"alert_from_address": "alerts@example.de"})
+    client.post("/settings/test-alert")
+    msg = env.upstream.messages[-1]
+    assert msg.mail_from == "alerts@example.de"
+    assert b"From: smtp-relay <alerts@example.de>" in msg.content
+
+
+def test_alert_sender_fallbacks():
+    from app.alerts import Alerts
+    relay = {"rewrite_enabled": False, "rewrite_from_address": "", "username": "apikey"}
+    settings = {"alert_from_address": "", "alert_address": "admin@example.de"}
+    assert Alerts.sender_address(relay, settings) == "admin@example.de"  # "apikey" is no address
+    relay["username"] = "me@mailbox.example"
+    assert Alerts.sender_address(relay, settings) == "me@mailbox.example"
+    relay.update(rewrite_enabled=True, rewrite_from_address="relay@example.de")
+    assert Alerts.sender_address(relay, settings) == "relay@example.de"
+    settings["alert_from_address"] = "alerts@example.de"
+    assert Alerts.sender_address(relay, settings) == "alerts@example.de"

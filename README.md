@@ -248,6 +248,16 @@ transcripts. They are sent through the relay chosen under **Send through relay**
 about a failing relay goes through another relay if there is one. With the optional **Web UI address**,
 alert mails link to the affected message. **Send test alert** checks the setup.
 
+Alerts are sent as `smtp-relay <address>`, using the first of these addresses that is set:
+
+1. **Send alerts from** in the alert settings,
+2. the sender rewriting address of the relay (if rewriting is enabled),
+3. the relay username, if it is an email address (not e.g. `apikey`),
+4. the alert address itself.
+
+The same address is used as envelope sender. The relay's sender rewriting is not applied to alerts, so a
+configured sender address must be one the relay accepts.
+
 ## Single sign-on with Authelia
 
 If the web UI is published through a reverse proxy with forward authentication, smtp-relay can log users in

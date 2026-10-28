@@ -180,6 +180,8 @@ class DeliveryQueue:
         if relay is not None:
             settings.update(as_settings(relay))
             self.db.update_message(message_id, relay_name=relay["name"])
+        if row["is_notification"]:
+            settings["rewrite_enabled"] = False  # alerts already use a sender the relay accepts
 
         trace = None
         if row["session_id"]:

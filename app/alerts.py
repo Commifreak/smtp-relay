@@ -63,6 +63,15 @@ class Alerts:
                 return relay
         return ordered[0]  # only the failing relay is left; the alert waits in the queue until it recovers
 
+    @staticmethod
+    def sender_address(relay: dict, settings: dict) -> str:
+        """Sender of alert mails: the configured address, else one the relay is known to accept."""
+        candidates = [settings["alert_from_address"],
+                      relay["rewrite_from_address"] if relay["rewrite_enabled"] else "",
+                      relay["username"] if "@" in relay["username"] else "",  # not e.g. "apikey"
+                      settings["alert_address"]]
+        return next(c for c in candidates if c)
+
     def send(self, kind: str, subject: str, lines: list[str], avoid_relay: int | None = None,
              link: str | None = None, attachment: bytes | None = None) -> int | None:
         """Queue an alert mail. Returns the message id, or None if alerts of this kind are off."""
@@ -74,7 +83,7 @@ class Alerts:
         if relay is None:
             log.warning("Alert not sent, no relay configured: %s", subject)
             return None
-        sender = (relay["rewrite_from_address"] if relay["rewrite_enabled"] else "") or relay["username"] or to
+        sender = self.sender_address(relay, s)
         body = list(lines)
         if s["public_url"]:
             body += ["", f"Details: {s['public_url']}{link or '/'}"]
