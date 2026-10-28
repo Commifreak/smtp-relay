@@ -1,5 +1,8 @@
 # smtp-relay
 
+[![CI](https://github.com/Commifreak/smtp-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/Commifreak/smtp-relay/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A small SMTP relay (smarthost client) in a Docker container. It accepts mail from devices and services on
 your local network (NAS, printers, Home Assistant, Proxmox, cron jobs …) and forwards it with
 authentication through **mailbox.org** or any other SMTP provider – or through **several providers**, chosen
@@ -82,14 +85,7 @@ Prebuilt images for amd64 and arm64 are published to the GitHub Container Regist
      smtp-relay-data:
    ```
 
-2. While the image is private, log in to the registry once on the Docker host. Use a GitHub personal
-   access token (classic) with the `read:packages` scope:
-
-   ```bash
-   echo <TOKEN> | docker login ghcr.io -u <github-user> --password-stdin
-   ```
-
-3. Start it and look up the initial password:
+2. Start it and look up the initial password:
 
    ```bash
    docker compose up -d
@@ -106,7 +102,7 @@ Prebuilt images for amd64 and arm64 are published to the GitHub Container Regist
    ================================================================
    ```
 
-4. Open `http://<docker-host>:8080`, log in and follow the setup wizard. It asks for your own credentials,
+3. Open `http://<docker-host>:8080`, log in and follow the setup wizard. It asks for your own credentials,
    the first relay server (with a connection test), the senders it handles and the allowed networks, and
    optional sender rewriting and the alert address. More relays can be added afterwards under **Relays**.
 
@@ -301,6 +297,8 @@ gateway IP of the Docker network (e.g. `172.17.0.1`), use one of these options:
 
 ## Security notes
 
+Please report vulnerabilities privately, see [SECURITY.md](SECURITY.md).
+
 - Do **not** expose the SMTP port to the internet. Together with the allowed networks and senders this
   keeps the service from becoming an open relay.
 - Complete the setup wizard right after the first start: until then, anyone who can read the container log
@@ -341,3 +339,7 @@ git tag v1.3.0 && git push origin v1.3.0   # -> images 1.3.0, 1.3 and 1
 
 Keep `__version__` in `app/__init__.py` in sync with the tag. Database changes for existing installations
 are numbered migrations in `app/migrations.py`; see `CLAUDE.md` for the conventions.
+
+## License
+
+[MIT](LICENSE)
